@@ -650,12 +650,14 @@ class SettingsViewModel @Inject constructor(
 
             // 1. Permissions
             sb.appendLine("=== Разрешения ===")
-            val perms = listOf(
+            val perms = mutableListOf(
                 Manifest.permission.READ_EXTERNAL_STORAGE,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE,
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                Manifest.permission.ACCESS_FINE_LOCATION
             )
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                perms += Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            }
             for (perm in perms) {
                 val granted = ContextCompat.checkSelfPermission(appContext, perm) ==
                     PackageManager.PERMISSION_GRANTED

@@ -7,6 +7,9 @@ import com.bydmate.app.data.local.dao.VehicleWriteLogDao
 import com.bydmate.app.data.local.entity.VehicleWriteLogEntity
 import com.bydmate.app.data.nativestack.ParsReader
 import com.bydmate.app.data.remote.DiParsData
+import com.bydmate.app.data.platform.VehiclePlatform
+import com.bydmate.app.data.platform.VehiclePlatformDetector
+import com.bydmate.app.data.remote.DiParsControlClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -22,6 +25,7 @@ class VehicleApiImpl @Inject constructor(
     private val allowlist: WriteAllowlist,
     private val writeLogDao: VehicleWriteLogDao,
     private val seatStore: SeatChannelStore,
+    private val diPlusControl: DiParsControlClient? = null,
 ) : VehicleApi {
 
     private val seatChannel = AdaptiveSeatChannel(
@@ -53,6 +57,18 @@ class VehicleApiImpl @Inject constructor(
     // ─── Writes ────────────────────────────────────────────────────────────────
 
     override suspend fun dispatch(commandString: String): Result<Unit> {
+        if (diPlusControl != null &&
+            VehiclePlatformDetector.detect(android.os.Build.VERSION.SDK_INT) ==
+            VehiclePlatform.DILINK2
+        ) {
+            return if (diPlusControl.sendCommand(commandString)) {
+                Result.success(Unit)
+            } else {
+                Result.failure(
+                    VehicleWriteError.HelperUnreachable(commandString, "Di+ sendCmd failed")
+                )
+            }
+        }
         CommandTranslator.resolveSeat(commandString)?.let { seat ->
             // Seat writes are switch then level (two binder transacts). Wrap in NonCancellable
             // so a hard stop between the two writes never leaves the seat half-commanded

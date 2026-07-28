@@ -9,10 +9,11 @@ class TripSourceTest {
         assertEquals("live", TripSource.LIVE)
         assertEquals("energydata", TripSource.ENERGYDATA)
         assertEquals("native_polling", TripSource.NATIVE_POLLING)
+        assertEquals("diplus", TripSource.DIPLUS)
     }
 
     @Test
     fun `all returns full set in stable order`() {
-        assertEquals(listOf("live", "energydata", "native_polling"), TripSource.all)
+        assertEquals(listOf("live", "energydata", "diplus", "native_polling"), TripSource.all)
     }
 }

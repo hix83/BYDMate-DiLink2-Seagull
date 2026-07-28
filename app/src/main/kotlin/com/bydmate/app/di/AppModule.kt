@@ -479,8 +479,17 @@ object AppModule {
         allowlist: com.bydmate.app.data.vehicle.WriteAllowlist,
         writeLogDao: VehicleWriteLogDao,
         seatChannelStore: com.bydmate.app.data.vehicle.SeatChannelStore,
+        diPlusControl: com.bydmate.app.data.remote.DiParsControlClient,
     ): com.bydmate.app.data.vehicle.VehicleApi =
-        com.bydmate.app.data.vehicle.VehicleApiImpl(parsReader, autoservice, helper, allowlist, writeLogDao, seatChannelStore)
+        com.bydmate.app.data.vehicle.VehicleApiImpl(
+            parsReader,
+            autoservice,
+            helper,
+            allowlist,
+            writeLogDao,
+            seatChannelStore,
+            diPlusControl,
+        )
 
     @Provides
     @Singleton

@@ -8,6 +8,10 @@ import com.bydmate.app.data.local.dao.TripPointDao
 import com.bydmate.app.data.local.dao.TripTombstoneDao
 import com.bydmate.app.data.local.entity.IdleDrainEntity
 import com.bydmate.app.data.local.entity.TripEntity
+import com.bydmate.app.data.platform.VehiclePlatform
+import com.bydmate.app.data.platform.VehiclePlatformDetector
+import com.bydmate.app.data.remote.DiPlusDbReader
+import com.bydmate.app.data.trips.TripSource
 import com.bydmate.app.data.repository.LastSessionRepository
 import com.bydmate.app.data.repository.SettingsRepository
 import com.bydmate.app.data.repository.TripRepository
@@ -29,6 +33,7 @@ class HistoryImporter @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val lastSessionRepository: LastSessionRepository,
     private val tripTombstoneDao: TripTombstoneDao,
+    private val diPlusDbReader: DiPlusDbReader = DiPlusDbReader(),
 ) {
     companion object {
         private const val TAG = "HistoryImporter"
@@ -463,7 +468,68 @@ class HistoryImporter @Inject constructor(
     /**
      * Unified sync entry point — always uses energydata pipeline.
      */
+    suspend fun syncFromDiPlus(): ImportResult {
+        if (!syncMutex.tryLock()) {
+            return ImportResult(trips = 0, details = "Di+: sync already running")
+        }
+        return try {
+            val records = diPlusDbReader.readTripInfo()
+            var imported = 0
+            var duplicates = 0
+            var shortTrips = 0
+            for (record in records) {
+                if (record.travelTime < MIN_TRIP_DURATION_SEC) {
+                    shortTrips++
+                    continue
+                }
+                val existing = tripDao.getByStartTsRange(
+                    record.timeStart - DEDUP_WINDOW_MS,
+                    record.timeStart + DEDUP_WINDOW_MS,
+                )
+                if (existing != null) {
+                    duplicates++
+                    continue
+                }
+                val kwh = record.kwhConsumed.takeIf { it > 0.0 }
+                val distance = record.mileage.takeIf { it >= 0.0 }
+                tripRepository.insertTrip(
+                    TripEntity(
+                        startTs = record.timeStart,
+                        endTs = record.timeEnd,
+                        distanceKm = distance,
+                        kwhConsumed = kwh,
+                        kwhPer100km = if (kwh != null && distance != null && distance > 0.0) {
+                            kwh / distance * 100.0
+                        } else null,
+                        socStart = record.socStart.toInt(),
+                        socEnd = record.socEnd.toInt(),
+                        avgSpeedKmh = record.avgSpeed.takeIf { it > 0.0 },
+                        source = TripSource.DIPLUS,
+                    )
+                )
+                imported++
+            }
+            ImportResult(
+                trips = imported,
+                details = "Di+: +$imported trips, $duplicates duplicates, $shortTrips short",
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "syncFromDiPlus failed", e)
+            ImportResult(trips = 0, error = e.message ?: e.toString())
+        } finally {
+            syncMutex.unlock()
+        }
+    }
+
     suspend fun runSync(): ImportResult {
+        if (VehiclePlatformDetector.detect(android.os.Build.VERSION.SDK_INT) ==
+            VehiclePlatform.DILINK2
+        ) {
+            val result = syncFromDiPlus()
+            calculateMissingCosts(settingsRepository.getTripCostTariff())
+            attachGpsPoints()
+            return result
+        }
         cleanupIdleDrainV2()
         val r = syncFromEnergyData()
         recalculateConsumptionFromEnergyData()

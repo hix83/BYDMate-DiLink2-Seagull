@@ -22,7 +22,10 @@ android {
 
     defaultConfig {
         applicationId = "com.bydmate.app"
-        minSdk = 29
+        // DiLink 2 head units used by BYD Seagull are based on Android 9
+        // (API 28). Keep targetSdk 29 for the legacy-storage behaviour used by
+        // Di+ and energydata imports, but allow installation on the older HU.
+        minSdk = 28
         // targetSdk 29 matches TripInfo — grants full legacy file access
         // on DiLink Android 12 (requestLegacyExternalStorage works).
         // targetSdk 30+ would break listFiles() on /storage/emulated/0/energydata/
@@ -32,7 +35,6 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        ndk { abiFilters += listOf("arm64-v8a") }  // DiLink is arm64-only; single ABI keeps sherpa-onnx native libs small
     }
 
     signingConfigs {
@@ -47,7 +49,14 @@ android {
     }
 
     buildTypes {
+        debug {
+            // x86_64 is used only by the Android 9 emulator. arm64-v8a keeps
+            // the same debug APK installable on a physical DiLink head unit.
+            ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        }
         release {
+            // Physical DiLink head units are arm64-only; keep release compact.
+            ndk { abiFilters += listOf("arm64-v8a") }
             signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = false
