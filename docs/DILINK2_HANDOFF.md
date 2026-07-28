@@ -102,7 +102,7 @@ Windows, invoke the wrapper directly:
 
 Debug APK output:
 
-`app/build/outputs/apk/debug/BYDMate-v3.8.1.apk`
+`app/build/outputs/apk/debug/BYDMate-v3.8.2.apk`
 
 Run unit tests with:
 
@@ -139,7 +139,7 @@ Install and launch:
 
 ```powershell
 & "$env:ANDROID_HOME\platform-tools\adb.exe" install -r `
-  app\build\outputs\apk\debug\BYDMate-v3.8.1.apk
+  app\build\outputs\apk\debug\BYDMate-v3.8.2.apk
 & "$env:ANDROID_HOME\platform-tools\adb.exe" shell monkey `
   -p com.bydmate.app -c android.intent.category.LAUNCHER 1
 ```
@@ -162,6 +162,22 @@ These warnings are expected and are not application crashes.
   observed during the emulator run.
 - Platform detector, Di+ parser, watchdog, vehicle API, history importer, and
   trip-source tests were added or updated.
+
+## Application updates
+
+`UpdateChecker` checks the latest GitHub release in:
+
+`hix83/BYDMate-DiLink2-Seagull`
+
+The updater uses the public, unauthenticated GitHub releases API and installs
+the first `.apk` asset attached to a release. Consequently, automatic updates
+work only when:
+
+1. the repository is public;
+2. a release tag newer than the app's `versionName` exists;
+3. that release has an APK asset.
+
+Do not embed a personal GitHub token in the APK to access private releases.
 
 ## Next work on a real vehicle
 

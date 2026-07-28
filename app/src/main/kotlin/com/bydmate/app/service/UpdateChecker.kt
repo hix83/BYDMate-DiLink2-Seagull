@@ -23,7 +23,8 @@ class UpdateChecker @Inject constructor(
     private val httpClient: OkHttpClient
 ) {
     companion object {
-        private const val GITHUB_API = "https://api.github.com/repos/AndyShaman/BYDMate/releases/latest"
+        const val UPDATE_REPOSITORY = "hix83/BYDMate-DiLink2-Seagull"
+        private const val GITHUB_API = "https://api.github.com/repos/$UPDATE_REPOSITORY/releases/latest"
         private const val PREFS_NAME = "update_prefs"
         private const val KEY_LAST_CHECK = "last_check"
         private const val KEY_AUTO_CHECK = "auto_check_enabled"
@@ -67,7 +68,7 @@ class UpdateChecker @Inject constructor(
         val request = Request.Builder()
             .url(GITHUB_API)
             .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "BYDMate-UpdateCheck")
+            .header("User-Agent", "BYDMate-DiLink2-Seagull-UpdateCheck")
             .build()
         val body = httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {

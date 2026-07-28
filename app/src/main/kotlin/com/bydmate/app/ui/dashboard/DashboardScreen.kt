@@ -66,6 +66,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bydmate.app.R
+import com.bydmate.app.data.platform.VehiclePlatform
+import com.bydmate.app.data.platform.VehiclePlatformDetector
 import com.bydmate.app.data.remote.DynamicMetric
 import com.bydmate.app.data.trips.TripCounterUi
 import com.bydmate.app.domain.calculator.Trend
@@ -84,6 +86,14 @@ fun DashboardScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val isSeagull = (
+        VehiclePlatformDetector.detect(android.os.Build.VERSION.SDK_INT) == VehiclePlatform.DILINK2
+    )
+    val vehicleArtwork = if (isSeagull) {
+        R.drawable.byd_seagull
+    } else {
+        R.drawable.leopard3
+    }
 
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner) {
@@ -109,11 +119,18 @@ fun DashboardScreen(
             Box(modifier = Modifier.weight(0.4f)) {
                 // Ghost car background
                 Image(
-                    painter = painterResource(R.drawable.leopard3),
+                    painter = painterResource(vehicleArtwork),
                     contentDescription = null,
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer { alpha = 0.06f },
+                        .graphicsLayer {
+                            alpha = 0.06f
+                            if (isSeagull) {
+                                scaleX = 1.18f
+                                scaleY = 1.18f
+                                translationY = -18.dp.toPx()
+                            }
+                        },
                     contentScale = ContentScale.Fit,
                     alignment = Alignment.Center
                 )
