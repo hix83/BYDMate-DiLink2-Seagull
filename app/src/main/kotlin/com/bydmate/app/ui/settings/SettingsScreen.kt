@@ -298,18 +298,23 @@ private fun SettingsRail(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             )
 
-            SettingsSection.entries.forEach { section ->
-                val isHidden = section == SettingsSection.SMART_HOME
-                if (isHidden && !smartHomeUnlocked) return@forEach
-                RailItem(
-                    section = section,
-                    isActive = section == selected,
-                    isHidden = isHidden,
-                    onClick = { onSelect(section) },
-                )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                SettingsSection.entries.forEach { section ->
+                    val isHidden = section == SettingsSection.SMART_HOME
+                    if (isHidden && !smartHomeUnlocked) return@forEach
+                    RailItem(
+                        section = section,
+                        isActive = section == selected,
+                        isHidden = isHidden,
+                        onClick = { onSelect(section) },
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.weight(1f))
             HorizontalDivider(color = CardBorder)
             Row(
                 modifier = Modifier
