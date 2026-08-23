@@ -183,7 +183,7 @@ class AudioCaptureDuckTest {
     @Test fun `explicit volume set during duck survives session restore`() {
         val audioManager = mockk<AudioManager>(relaxed = true)
         every { audioManager.isMusicActive } returns true
-        every { audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) } returns 10
+        every { audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) } returns 10 andThen 5
         val capture = AudioCapture(audioManager, prefsMock().first)
         val saved = capture.duckMusic()          // 10 -> 1
         capture.applyExplicitVolume(5)           // agent executed an explicit "volume 5"
@@ -191,6 +191,38 @@ class AudioCaptureDuckTest {
         // apply sets 5 once, the teardown restore returns to 5 once = 2 calls with index 5
         verify(exactly = 2) { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 5, 0) }
         verify(exactly = 0) { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 10, 0) }
+    }
+
+    @Test fun `physical volume change during duck becomes the restore target`() {
+        val audioManager = mockk<AudioManager>(relaxed = true)
+        var vol = 16
+        every { audioManager.isMusicActive } returns true
+        every { audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) } answers { vol }
+        every { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, any(), 0) } answers { vol = secondArg<Int>() }
+        val capture = AudioCapture(audioManager, prefsMock().first)
+
+        val saved = capture.duckMusic() // 16 -> 1
+        vol = 20                        // steering-wheel keys bypass the app
+        capture.restoreMusic(saved)
+
+        assertEquals(20, vol)
+        verify(exactly = 0) { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 16, 0) }
+    }
+
+    @Test fun `physical volume down to zero during duck remains muted after restore`() {
+        val audioManager = mockk<AudioManager>(relaxed = true)
+        var vol = 16
+        every { audioManager.isMusicActive } returns true
+        every { audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) } answers { vol }
+        every { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, any(), 0) } answers { vol = secondArg<Int>() }
+        val capture = AudioCapture(audioManager, prefsMock().first)
+
+        val saved = capture.duckMusic()
+        vol = 0
+        capture.restoreMusic(saved)
+
+        assertEquals(0, vol)
+        verify(exactly = 0) { audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 16, 0) }
     }
 
     @Test fun `apply without an active duck sets volume but does not register a restore target`() {
@@ -208,7 +240,7 @@ class AudioCaptureDuckTest {
     @Test fun `pendingRestoreVolume visible only while a duck is active`() {
         val audioManager = mockk<AudioManager>(relaxed = true)
         every { audioManager.isMusicActive } returns true
-        every { audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) } returns 10
+        every { audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) } returns 10 andThen 5
         val capture = AudioCapture(audioManager, prefsMock().first)
         assertNull(capture.pendingRestoreVolume())
         val saved = capture.duckMusic()

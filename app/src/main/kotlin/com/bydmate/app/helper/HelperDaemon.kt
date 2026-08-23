@@ -256,6 +256,13 @@ fun main(args: Array<String>) {
                     true
                 }.getOrElse { reply?.writeInt(-1); reply?.writeInt(0); true }
 
+                HelperBinderProtocol.TX_SET_AC_COMPRESSOR -> runCatching {
+                    val raw = data.readInt()
+                    val ok = raw in 0..1 && setAcCompressorViaStockUi(raw == 1)
+                    reply?.writeInt(if (ok) 0 else -1); reply?.writeInt(0)
+                    true
+                }.getOrElse { reply?.writeInt(-1); reply?.writeInt(0); true }
+
                 HelperBinderProtocol.TX_LAUNCH_AND_FORCE -> runCatching {
                     val pkg = data.readString() ?: ""
                     val displayId = data.readInt(); val width = data.readInt(); val height = data.readInt()
@@ -298,23 +305,19 @@ fun main(args: Array<String>) {
                     // the caller may only name the launcher package.
                     // Validate the flag daemon-side too — a privileged shell-uid op must not
                     // trust the caller. Only 0/1 are a defined state; reject anything else.
-                    val ok = if (pkg == "com.byd.autovoice" && hidden in 0..1) {
-                        // `pm disable-user --user 0` force-stops the package and disables its
-                        // components so the framework stops routing the steering voice button to it.
-                        // `pm hide` left the already-running system assistant alive — the wheel
-                        // button still woke it. The competitor uses disable-user and suppresses the
-                        // assistant 100%; reversed with `pm enable`.
-                        val cmd = if (hidden == 1) "pm disable-user --user 0" else "pm enable"
-                        // The native assistant ships as a package FAMILY on Leopard 3: the launcher
-                        // (com.byd.autovoice), the wake/recognition engine (.engine) that actually
-                        // services the wheel mic button, and TTS output (.tts). Disabling only the
-                        // launcher leaves the wheel button live, so we disable the whole family.
-                        // Siblings are hardcoded literals, never caller input. Success is gated on
-                        // BOTH the launcher and the wake engine; TTS is output-only and best-effort.
-                        val primaryOk = shExec("$cmd \"\$1\"", pkg).code == 0
-                        val engineOk = shExec("$cmd \"\$1\"", "com.byd.autovoice.engine").code == 0
-                        shExec("$cmd \"\$1\"", "com.byd.autovoice.tts")
-                        primaryOk && engineOk
+                    val ok = if (pkg == "com.byd.autovoice") {
+                        setNativeAssistantHiddenCore(
+                            hidden = hidden,
+                            isInstalled = { candidate ->
+                                shExec("pm path \"\$1\" >/dev/null", candidate).code == 0
+                            },
+                            apply = { candidate, disable ->
+                                // `pm disable-user --user 0` force-stops the package and disables
+                                // its components; `pm enable` is the exact reversible operation.
+                                val cmd = if (disable) "pm disable-user --user 0" else "pm enable"
+                                shExec("$cmd \"\$1\"", candidate).code == 0
+                            },
+                        )
                     } else false
                     reply?.writeInt(if (ok) 0 else -1); reply?.writeInt(0)
                     true
@@ -626,6 +629,107 @@ private fun execShell(command: String): String {
 }
 
 private class CmdResult(val code: Int, val stdout: String)
+
+/** State exposed by the stock DiLink 2 climate view hierarchy. */
+internal data class AcCompressorUiState(
+    val selected: Boolean,
+    val centerX: Int,
+    val centerY: Int,
+)
+
+/**
+ * Extracts the compressor button state and tap point from `uiautomator dump` output.
+ * The stock Seagull climate APK publishes a stable resource id and `selected` flag;
+ * using both makes the operation idempotent instead of blindly toggling the snowflake.
+ */
+internal fun parseAcCompressorUiState(xml: String): AcCompressorUiState? {
+    val node = Regex(
+        """<node\b[^>]*resource-id="com\.byd\.airconditioning:id/ac_compressor_id"[^>]*/?>"""
+    ).find(xml)?.value ?: return null
+    val selected = when (Regex("""selected="(true|false)""")
+        .find(node)?.groupValues?.get(1)) {
+        "true" -> true
+        "false" -> false
+        else -> return null
+    }
+    val bounds = Regex("""bounds="\[(\d+),(\d+)]\[(\d+),(\d+)]""")
+        .find(node)?.groupValues ?: return null
+    val left = bounds[1].toIntOrNull() ?: return null
+    val top = bounds[2].toIntOrNull() ?: return null
+    val right = bounds[3].toIntOrNull() ?: return null
+    val bottom = bounds[4].toIntOrNull() ?: return null
+    if (right <= left || bottom <= top) return null
+    return AcCompressorUiState(selected, (left + right) / 2, (top + bottom) / 2)
+}
+
+/**
+ * Confirmed DiLink 2 fallback for the compressor button. Everything is hardcoded:
+ * callers cannot choose an activity, file or tap coordinate through this shell-uid API.
+ * The previous foreground screen is restored with BACK in `finally` on every launched path.
+ */
+private fun setAcCompressorViaStockUi(enabled: Boolean): Boolean {
+    val launched = shExec(
+        "am start -W -a OPEN_AIR_CONDITIONING " +
+            "-n com.byd.airconditioning/.mainactivity.FullScreenMainActivity"
+    )
+    if (launched.code != 0 || launched.stdout.contains("Error", ignoreCase = true)) return false
+
+    val dumpPath = "/data/local/tmp/bydmate_ac_ui.xml"
+    fun readState(): AcCompressorUiState? {
+        repeat(2) {
+            val dumped = shExec("uiautomator dump --compressed \"\$1\"", dumpPath)
+            if (dumped.code == 0) {
+                val xml = runCatching { java.io.File(dumpPath).readText() }.getOrNull()
+                parseAcCompressorUiState(xml.orEmpty())?.let { return it }
+            }
+            Thread.sleep(250L)
+        }
+        return null
+    }
+
+    return try {
+        Thread.sleep(350L)
+        val before = readState() ?: return false
+        if (before.selected == enabled) return true
+        val tapped = shExec(
+            "input tap \"\$1\" \"\$2\"",
+            before.centerX.toString(),
+            before.centerY.toString(),
+        )
+        if (tapped.code != 0) return false
+        Thread.sleep(300L)
+        readState()?.selected == enabled
+    } finally {
+        shExec("input keyevent BACK")
+        runCatching { java.io.File(dumpPath).delete() }
+    }
+}
+
+/**
+ * Native assistant packages differ between BYD generations. Leopard exposes a launcher,
+ * recognition engine and TTS as separate packages; DiLink 2 Seagull ships a single privileged
+ * `aispeech` package. Keep the family hardcoded so the shell daemon never becomes a generic
+ * package-disabling API.
+ */
+internal val NATIVE_ASSISTANT_PACKAGES = listOf(
+    "com.byd.autovoice",
+    "com.byd.autovoice.engine",
+    "com.byd.autovoice.tts",
+    "com.byd.autovoice.aispeech",
+)
+
+/** Testable whitelist core for TX_SET_APP_HIDDEN. Applies the operation to every installed
+ * family member and succeeds only when at least one member exists and every applied command did. */
+internal fun setNativeAssistantHiddenCore(
+    hidden: Int,
+    isInstalled: (String) -> Boolean,
+    apply: (packageName: String, disabled: Boolean) -> Boolean,
+): Boolean {
+    if (hidden !in 0..1) return false
+    val installed = NATIVE_ASSISTANT_PACKAGES.filter(isInstalled)
+    if (installed.isEmpty()) return false
+    return installed.map { apply(it, hidden == 1) }.all { it }
+}
 
 /**
  * Runs [script] under sh with [args] bound to positional params ($1, $2, …) so untrusted values

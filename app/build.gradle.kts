@@ -30,8 +30,8 @@ android {
         // on DiLink Android 12 (requestLegacyExternalStorage works).
         // targetSdk 30+ would break listFiles() on /storage/emulated/0/energydata/
         targetSdk = 29
-        versionCode = 384
-        versionName = "3.8.2"
+        versionCode = 385
+        versionName = "3.8.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -54,6 +54,27 @@ android {
             // the same debug APK installable on a physical DiLink head unit.
             ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
         }
+        create("physicalDebug") {
+            // Compact field build for a physical DiLink head unit. It deliberately
+            // keeps debug semantics/signing so adb, run-as and diagnostic logging
+            // remain available and it can update the regular Mac debug build.
+            initWith(getByName("debug"))
+            matchingFallbacks += listOf("debug")
+            isDebuggable = true
+            // Hilt 2.53.1 + KSP loses BYDMateApp_GeneratedInjector from the R8 runtime
+            // input for this debuggable custom build type, producing an APK that installs
+            // but crashes before Application.onCreate. Keep the field APK arm64-only (the
+            // dominant size saving) and do not minify this diagnostic build.
+            isMinifyEnabled = false
+            ndk {
+                abiFilters.clear()
+                abiFilters += "arm64-v8a"
+            }
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
         release {
             // Physical DiLink head units are arm64-only; keep release compact.
             ndk { abiFilters += listOf("arm64-v8a") }
@@ -71,7 +92,8 @@ android {
         val variant = this
         variant.outputs.all {
             val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            output.outputFileName = "BYDMate-v${variant.versionName}.apk"
+            val suffix = if (variant.buildType.name == "physicalDebug") "-physical-debug" else ""
+            output.outputFileName = "BYDMate-v${variant.versionName}$suffix.apk"
         }
     }
 
@@ -88,6 +110,9 @@ android {
         // so testDebugUnitTest AND testReleaseUnitTest can find Migration*Test
         // schemas. ~50KB extra in release APK is acceptable (sideload only).
         getByName("debug") {
+            assets.srcDirs("$projectDir/schemas")
+        }
+        getByName("physicalDebug") {
             assets.srcDirs("$projectDir/schemas")
         }
         getByName("release") {

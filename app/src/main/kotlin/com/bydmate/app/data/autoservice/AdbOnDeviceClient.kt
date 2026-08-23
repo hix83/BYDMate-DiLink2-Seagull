@@ -2,6 +2,7 @@ package com.bydmate.app.data.autoservice
 
 import android.content.Context
 import android.util.Log
+import com.bydmate.app.helper.parseAcCompressorUiState
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -37,6 +38,10 @@ interface AdbOnDeviceClient {
      * No-op effect if already granted. Returns true on success.
      */
     suspend fun grantUsageStatsAppop(packageName: String): Boolean
+
+    /** Idempotently sets the stock DiLink 2 compressor (snowflake) through a hardcoded
+     *  climate-UI sequence under the on-device ADB shell uid. */
+    suspend fun setAcCompressorViaStockUi(enable: Boolean): Boolean = false
 
     /**
      * Spawns the helper daemon under shell uid via app_process, using the app's
@@ -146,6 +151,50 @@ class AdbOnDeviceClientImpl @Inject constructor(
         }
     }
 
+    override suspend fun setAcCompressorViaStockUi(enable: Boolean): Boolean = withContext(Dispatchers.IO) {
+        val p = protocol ?: run {
+            val connected = connect()
+            if (connected.isFailure) return@withContext false
+            protocol ?: return@withContext false
+        }
+        val dumpPath = AC_UI_DUMP_PATH
+
+        fun readState(): com.bydmate.app.helper.AcCompressorUiState? {
+            repeat(2) {
+                val dumped = p.exec("uiautomator dump --compressed $dumpPath")
+                if (dumped != null) {
+                    val xml = p.exec("cat $dumpPath")
+                    parseAcCompressorUiState(xml.orEmpty())?.let { return it }
+                }
+                Thread.sleep(250L)
+            }
+            return null
+        }
+
+        val launched = p.exec(
+            "am start -W -a OPEN_AIR_CONDITIONING " +
+                "-n com.byd.airconditioning/.mainactivity.FullScreenMainActivity"
+        ) ?: return@withContext false
+        if (launched.contains("Error", ignoreCase = true)) return@withContext false
+
+        try {
+            Thread.sleep(350L)
+            val before = readState() ?: return@withContext false
+            if (before.selected == enable) return@withContext true
+            if (p.exec("input tap ${before.centerX} ${before.centerY}") == null) {
+                return@withContext false
+            }
+            Thread.sleep(300L)
+            readState()?.selected == enable
+        } catch (e: Exception) {
+            Log.w(TAG, "setAcCompressorViaStockUi failed: ${e.message}")
+            false
+        } finally {
+            runCatching { p.exec("input keyevent BACK") }
+            runCatching { p.exec("rm -f $dumpPath") }
+        }
+    }
+
     override suspend fun spawnHelper(): Boolean = withContext(Dispatchers.IO) {
         val p = protocol ?: run {
             val r = connect()
@@ -235,5 +284,6 @@ class AdbOnDeviceClientImpl @Inject constructor(
         // Helper daemon — hardcoded so neither caller can inject paths/cmdlines.
         private const val HELPER_PROCESS_NAME = "bydmate_helper"
         private const val HELPER_LOG_PATH = "/data/local/tmp/bydmate_helper.log"
+        private const val AC_UI_DUMP_PATH = "/data/local/tmp/bydmate_ac_ui.xml"
     }
 }

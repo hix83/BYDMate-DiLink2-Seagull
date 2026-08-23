@@ -480,6 +480,7 @@ object AppModule {
         writeLogDao: VehicleWriteLogDao,
         seatChannelStore: com.bydmate.app.data.vehicle.SeatChannelStore,
         diPlusControl: com.bydmate.app.data.remote.DiParsControlClient,
+        adbOnDevice: com.bydmate.app.data.autoservice.AdbOnDeviceClient,
     ): com.bydmate.app.data.vehicle.VehicleApi =
         com.bydmate.app.data.vehicle.VehicleApiImpl(
             parsReader,
@@ -489,6 +490,7 @@ object AppModule {
             writeLogDao,
             seatChannelStore,
             diPlusControl,
+            adbOnDevice,
         )
 
     @Provides

@@ -46,6 +46,7 @@ class SherpaTtsEngine(
     private val liveliness: () -> Int = { 33 },
     private val marker: RuStressMarker = RuStressMarker { null },
     private val loadGuard: AsrLoadGuard? = null,
+    private val audioManager: AudioManager? = null,
 ) : TtsEngine {
 
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "tts-worker") }
@@ -89,6 +90,49 @@ class SherpaTtsEngine(
     // zeroes it.
     @Volatile private var audibleUntilMs: Long = 0L
 
+    // DiLink 2 exposes a real vendor STREAM_NAVI (14, range 0..10). Public AudioAttributes do
+    // not retain unknown vendor stream numbers and map them back to MUSIC, so createTrack uses
+    // AudioTrack's legacy stream constructor. Its original volume is held only while speech
+    // owns the route and restored on every normal/error/stop exit.
+    private val voiceVolumeLock = Any()
+    private var savedVoiceVolume: Int? = null
+
+    /** Temporarily raises only the dedicated DiLink output used for assistant speech.
+     *  The original value is saved once for the whole reply/queue and restored on every exit. */
+    internal fun acquireVoiceStreamVolume() {
+        val manager = audioManager ?: return
+        synchronized(voiceVolumeLock) {
+            if (savedVoiceVolume != null) return
+            runCatching {
+                val original = manager.getStreamVolume(DILINK2_TTS_STREAM)
+                val maximum = manager.getStreamMaxVolume(DILINK2_TTS_STREAM).coerceAtLeast(0)
+                val target = DILINK2_TTS_VOLUME_INDEX.coerceIn(0, maximum)
+                savedVoiceVolume = original
+                if (original != target) {
+                    manager.setStreamVolume(DILINK2_TTS_STREAM, target, 0)
+                }
+                Log.i(TAG, "voice stream volume acquired: stream=$DILINK2_TTS_STREAM saved=$original target=$target")
+            }.onFailure {
+                savedVoiceVolume = null
+                Log.w(TAG, "voice stream volume acquire failed", it)
+            }
+        }
+    }
+
+    internal fun restoreVoiceStreamVolume() {
+        val manager = audioManager ?: return
+        synchronized(voiceVolumeLock) {
+            val original = savedVoiceVolume ?: return
+            // Clear first so a failing vendor AudioService cannot leave the engine permanently
+            // believing it owns the stream and prevent a later reply from trying again.
+            savedVoiceVolume = null
+            runCatching {
+                manager.setStreamVolume(DILINK2_TTS_STREAM, original, 0)
+                Log.i(TAG, "voice stream volume restored: stream=$DILINK2_TTS_STREAM value=$original")
+            }.onFailure { Log.w(TAG, "voice stream volume restore failed", it) }
+        }
+    }
+
     private val _speaking = MutableStateFlow(false)
     override val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
 
@@ -100,6 +144,7 @@ class SherpaTtsEngine(
      *  against the old engine is dropped instead of speaking mid-switch. */
     override fun reload() {
         generation.incrementAndGet()
+        restoreVoiceStreamVolume()
         marker.preload()
         worker.execute {
             runCatching { tts?.release() }
@@ -144,6 +189,7 @@ class SherpaTtsEngine(
                     )
                     Log.i(TAG, "synth done: samples=${samples?.size} generation ok=${generation.get() == myGen}")
                     if (samples != null && samples.isNotEmpty() && generation.get() == myGen) {
+                        acquireVoiceStreamVolume()
                         // Start playback only now that the sentence is in hand: a track left
                         // ACTIVE and starving through multi-second synthesis gets underrun-
                         // disabled by AudioFlinger (BUFFER TIMEOUT), and this HAL never
@@ -191,6 +237,7 @@ class SherpaTtsEngine(
                 if (generation.get() == myGen) {
                     pendingTarget = null
                     _speaking.value = false
+                    restoreVoiceStreamVolume()
                 }
             }
         }
@@ -198,10 +245,17 @@ class SherpaTtsEngine(
     }
 
     override fun stop() {
+        // Snapshot before clearing the public state. DiLink 2 may block inside pause()/flush()
+        // for about three seconds even when the parked track is already silent. That made every
+        // steering-wheel invocation pay the HAL timeout before the microphone could open.
+        // A live reply still needs synchronous silencing for barge-in; an idle track does not.
+        val hadActiveSpeech = _speaking.value
+        val stopStartedMs = SystemClock.elapsedRealtime()
         generation.incrementAndGet()
         pendingTarget = null
         audibleUntilMs = 0L
         _speaking.value = false
+        restoreVoiceStreamVolume()
         // Never reuse a flushed track: after pause()+flush() the DiLink HAL restarts it with a
         // broken server-side read position (field log APK 340: "prior state:STATE_FLUSHED,
         // server read:-1182393"), so every frame-position comparison against it -- audible(),
@@ -210,11 +264,17 @@ class SherpaTtsEngine(
         // keeps in-flight worker jobs (which hold their own ref) from racing a re-created track.
         val stale = track
         track = null
-        runCatching {
-            stale?.pause()
-            stale?.flush()
+        if (hadActiveSpeech) {
+            runCatching {
+                stale?.pause()
+                stale?.flush()
+            }
         }
         worker.execute { runCatching { stale?.release() } }
+        Log.i(
+            TAG,
+            "stop: active=$hadActiveSpeech syncMs=${SystemClock.elapsedRealtime() - stopStartedMs}",
+        )
     }
 
     /** Physical signal, not the logical [speaking] flag: false the instant the track has caught
@@ -260,6 +320,7 @@ class SherpaTtsEngine(
             try {
                 runCatching {
                     val out = ensureTrackForRate(sampleRate)
+                    acquireVoiceStreamVolume()
                     if (out.playState != AudioTrack.PLAYSTATE_PLAYING) out.play()
                     // Apply user speech rate via time-stretch; piper PCM is already rate-adjusted
                     // at synthesis (TtsTuning.speed), so PlaybackParams are online-path only here.
@@ -321,6 +382,7 @@ class SherpaTtsEngine(
                 if (generation.get() == myGen) {
                     pendingTarget = null
                     _speaking.value = false
+                    restoreVoiceStreamVolume()
                 }
             }
         }
@@ -446,6 +508,7 @@ class SherpaTtsEngine(
                     )
                     Log.i(TAG, "synth done (queued): samples=${samples?.size} generation ok=${generation.get() == myGen}")
                     if (samples != null && samples.isNotEmpty() && generation.get() == myGen) {
+                        acquireVoiceStreamVolume()
                         // Same underrun-disable guard as speak(): start the track only with the
                         // sentence in hand. The first sentence of a queue synthesizes for seconds
                         // while an already-started track would starve ACTIVE and get disabled;
@@ -499,6 +562,7 @@ class SherpaTtsEngine(
                     if (generation.get() == myGen) {
                         pendingTarget = null
                         _speaking.value = false
+                        restoreVoiceStreamVolume()
                     }
                 }
             }
@@ -580,13 +644,14 @@ class SherpaTtsEngine(
             .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
             .setSampleRate(sampleRate)
             .build()
-        // BYD DiLink routes STREAM_BTTS(17) to the UI "Voice" volume slider (live-validated on
-        // Leopard 3, 2026-07-05). setLegacyStreamType is the only public way to target a custom
-        // stream; if this firmware rejects it (exception or uninitialized track), fall back to
-        // the previous accessibility route, which has an independent volume.
+        // DiLink 2 Seagull has a real vendor navigation stream (14). It must be passed through
+        // AudioTrack's legacy constructor: AudioAttributes cannot encode unknown vendor stream
+        // numbers and maps them back to MUSIC (the earlier failed route appeared as ST=3 in
+        // AudioFlinger). If stream 14 is rejected, retain the accessibility fallback rather than
+        // losing speech completely.
         var viaFallback = false
         val result = createTrackWithFallback(
-            primary = { newTrack(bydVoiceAttributes(), format, bufLen).takeIfInitialized() },
+            primary = { newLegacyTrack(DILINK2_TTS_STREAM, sampleRate, bufLen).takeIfInitialized() },
             fallback = { viaFallback = true; newTrack(accessibilityAttributes(), format, bufLen) },
         )
         if (result.state != AudioTrack.STATE_INITIALIZED) {
@@ -613,12 +678,20 @@ class SherpaTtsEngine(
         attrs, format, bufLen, AudioTrack.MODE_STREAM, AudioManager.AUDIO_SESSION_ID_GENERATE,
     )
 
+    @Suppress("DEPRECATION")
+    private fun newLegacyTrack(streamType: Int, sampleRate: Int, bufLen: Int) = AudioTrack(
+        streamType,
+        sampleRate,
+        AudioFormat.CHANNEL_OUT_MONO,
+        AudioFormat.ENCODING_PCM_FLOAT,
+        bufLen,
+        AudioTrack.MODE_STREAM,
+        AudioManager.AUDIO_SESSION_ID_GENERATE,
+    )
+
     private fun AudioTrack.takeIfInitialized(): AudioTrack? =
         if (state == AudioTrack.STATE_INITIALIZED) this
         else { runCatching { release() }; null }
-
-    private fun bydVoiceAttributes(): AudioAttributes =
-        AudioAttributes.Builder().setLegacyStreamType(BYD_STREAM_BTTS).build()
 
     private fun accessibilityAttributes(): AudioAttributes = AudioAttributes.Builder()
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -634,8 +707,12 @@ class SherpaTtsEngine(
         // ACCESSIBILITY back onto MUSIC can be moved to a fallback (USAGE_NOTIFICATION_EVENT /
         // USAGE_ALARM) in one edit.
         internal val TTS_USAGE = AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY
-        // BYD custom stream behind the DiLink UI "Voice" volume slider.
-        internal const val BYD_STREAM_BTTS = 17
+        // Vendor stream IDs taken from this DiLink 2's native AudioPolicy dump. AudioService's
+        // Java-side labels are shifted after NAVI and misleadingly called 17 "BTTS"; the native
+        // mixer is authoritative: NAVI=14, MUTE=15, BTTS=16, REROUTING=17.
+        internal const val BYD_STREAM_BTTS = 16
+        internal const val DILINK2_TTS_STREAM = 14
+        internal const val DILINK2_TTS_VOLUME_INDEX = 10
 
         // The track buffer holds this many seconds of audio so a whole sentence's blocking write
         // returns while the sentence is still playing -- the worker then synthesizes the NEXT
@@ -747,10 +824,23 @@ class SherpaTtsEngine(
             retract: () -> Unit,
         ): Int {
             publish()
-            val written = write(samples)
+            // Keep the PCM itself at unity for the first independent-stream field test. The
+            // dedicated stream volume is raised temporarily by acquireVoiceStreamVolume();
+            // stacking digital gain on top would make clipping/loudness hard to diagnose.
+            val written = write(applyOutputGain(samples))
             if (!stillCurrent()) retract()
             return written
         }
+
+        internal fun applyOutputGain(
+            samples: FloatArray,
+            gain: Float = OUTPUT_GAIN,
+        ): FloatArray = FloatArray(samples.size) { index ->
+            val sample = samples[index]
+            if (!sample.isFinite()) 0f else (sample * gain).coerceIn(-1f, 1f)
+        }
+
+        internal const val OUTPUT_GAIN = 1.0f
 
         private const val DRAIN_POLL_MS = 20L
 

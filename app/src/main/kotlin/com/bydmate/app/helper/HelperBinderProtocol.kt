@@ -35,6 +35,9 @@ import android.os.IBinder
  *       -> reply: writeInt(status), writeInt(0)   // status 0 = ok; -1 = not whitelisted / failed
  *   TX_ENABLE_NOTIFICATION_LISTENER : (no args)           -> reply: writeInt(status), writeInt(0)  // status 0 = our listener stub enabled
  *   TX_SET_CLUSTER_MODE: [int on(0|1)] -> [int status]; status 0 = ok.
+ *   TX_SET_AC_COMPRESSOR: [int enabled(0|1)] -> [int status], [int 0]. Opens the
+ *       stock DiLink 2 climate screen, reads ac_compressor_id selected state and
+ *       taps it only when the requested state differs.
  *
  * Projection status: 0 = success, <0 = error/unavailable. Surface is written LAST so a
  * marshalling test can assert the scalar args without round-tripping the Surface.
@@ -98,6 +101,10 @@ object HelperBinderProtocol {
      *  reflection (TETHERING_WIFI = 0). Requires TETHER_PRIVILEGED held by shell uid.
      *  Request: [int enable: 1=on, 0=off] -> [int status (0=ok, -1=fail), int 0]. */
     val TX_SET_HOTSPOT: Int = IBinder.FIRST_CALL_TRANSACTION + 24              // 25
+
+    /** Idempotent DiLink 2 compressor control through the stock climate UI. The shell daemon
+     *  is deliberately limited to this one activity and its ac_compressor_id control. */
+    val TX_SET_AC_COMPRESSOR: Int = IBinder.FIRST_CALL_TRANSACTION + 25        // 26
 
     /** Hard cap on items per TX_READ_BATCH call (FidMap is 58 today; 128 leaves headroom). */
     const val MAX_BATCH_ITEMS: Int = 128

@@ -102,6 +102,10 @@ interface HelperClient {
      *  TETHER_PRIVILEGED). True on daemon status 0. Needs on-car validation. */
     suspend fun setHotspot(enable: Boolean): Boolean
 
+    /** Sets the DiLink 2 A/C compressor (snowflake) through the stock climate screen.
+     *  The daemon reads the control's selected state first, so this is not a blind toggle. */
+    suspend fun setAcCompressor(enable: Boolean): Boolean
+
     /**
      * Direct cluster projection: find-or-launch [packageName], switch its task to freeform,
      * move it to [displayId] with the given window bounds and focus it. UNAVAILABLE = the
@@ -238,6 +242,14 @@ open class HelperClientImpl @Inject constructor() : HelperClient {
     override suspend fun setHotspot(enable: Boolean): Boolean =
         statusOk(HelperBinderProtocol.TX_SET_HOTSPOT) { it.writeInt(if (enable) 1 else 0) }
 
+    override suspend fun setAcCompressor(enable: Boolean): Boolean =
+        transactParsed(HelperBinderProtocol.TX_SET_AC_COMPRESSOR, {
+            it.writeInt(if (enable) 1 else 0)
+        }, timeoutMs = CLIMATE_UI_TIMEOUT_MS) { reply ->
+            val status = if (reply.dataAvail() >= 4) reply.readInt() else return@transactParsed false
+            status == 0
+        } ?: false
+
     // FORCE_TIMEOUT_MS, not the default 2s: mirrors launchAndForce (launch retry loop in the
     // daemon can take up to ~9.5s on a cold start before the pin loop even begins).
     override suspend fun launchFreeform(
@@ -352,6 +364,7 @@ open class HelperClientImpl @Inject constructor() : HelperClient {
         private const val TAG = "HelperClient"
         private const val REQ_TIMEOUT_MS = 2000L
         private const val FORCE_TIMEOUT_MS = 15000L
+        private const val CLIMATE_UI_TIMEOUT_MS = 20000L
         /** TX_READ_BATCH budget: 58 in-process transacts typically take ~100 ms; 5 s is a 50× margin. */
         const val BATCH_TIMEOUT_MS = 5_000L
     }

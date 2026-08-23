@@ -9,6 +9,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import com.bydmate.app.navdata.NavA11yFeed
+import com.bydmate.app.service.TrackingService
 import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -69,9 +70,17 @@ class SteeringWheelKeyService : AccessibilityService() {
         val voicePrefs = applicationContext.getSharedPreferences("voice", Context.MODE_PRIVATE)
         val voiceEnabled = voicePrefs.getBoolean("voice_enabled", false)
         val voiceKey = voicePrefs.getInt("voice_keycode", DEFAULT_VOICE_KEYCODE)
-        when (voiceDecision(event.keyCode, isDown, voiceEnabled, voiceKey)) {
+        when (voiceDecision(event.keyCode, isDown, voiceEnabled, voiceKey, event.repeatCount)) {
             VoiceKeyDecision.TRIGGER -> {
-                entryPoint().voiceController().onPttPressed()
+                Log.i(
+                    TAG,
+                    "voice key: code=${event.keyCode} action=${event.action} repeat=${event.repeatCount}",
+                )
+                // This accessibility service lives in :steering so the DiLink 2 framework
+                // can bind it reliably. Never construct/run VoiceController here: process
+                // statics such as TrackingService.lastData would be a separate empty copy.
+                // Route the press to the already-running main-process service instead.
+                TrackingService.requestVoicePtt(applicationContext)
                 return true
             }
             // Swallow the matching key's UP edge too — otherwise it falls through to the

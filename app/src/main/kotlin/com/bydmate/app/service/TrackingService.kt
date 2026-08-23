@@ -99,6 +99,7 @@ class TrackingService : Service(), LocationListener {
     @Named("ttsLoadGuard") @Inject lateinit var ttsLoadGuard: com.bydmate.app.voice.AsrLoadGuard
     @Inject lateinit var ttsModelManager: com.bydmate.app.voice.TtsModelManager
     @Inject lateinit var audioCapture: com.bydmate.app.voice.AudioCapture
+    @Inject lateinit var voiceController: com.bydmate.app.voice.VoiceController
     @Inject lateinit var hudController: com.bydmate.app.hud.HudController
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -228,6 +229,7 @@ class TrackingService : Service(), LocationListener {
 
     companion object {
         private const val TAG = "TrackingService"
+        internal const val ACTION_VOICE_PTT = "com.bydmate.app.action.VOICE_PTT"
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "bydmate_tracking"
         // Throttle autoservice gun-state read so we don't hit Binder/ADB on every
@@ -397,6 +399,17 @@ class TrackingService : Service(), LocationListener {
 
         fun start(context: Context) {
             val intent = Intent(context, TrackingService::class.java)
+            context.startForegroundService(intent)
+        }
+
+        /** Cross-process steering-key bridge. The accessibility service is hosted in
+         * :steering, while live vehicle state and the voice session belong to this service's
+         * main process. An explicit foreground-service intent crosses that boundary without
+         * exporting a receiver or duplicating telemetry through shared preferences. */
+        fun requestVoicePtt(context: Context) {
+            val intent = Intent(context, TrackingService::class.java).apply {
+                action = ACTION_VOICE_PTT
+            }
             context.startForegroundService(intent)
         }
 
@@ -663,6 +676,10 @@ class TrackingService : Service(), LocationListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         maybeAttachWidget()
+        if (intent?.action == ACTION_VOICE_PTT) {
+            Log.i(TAG, "Voice PTT received in main process; snapshotReady=${lastData.value != null}")
+            voiceController.onSteeringPttPressed()
+        }
         return START_STICKY
     }
 

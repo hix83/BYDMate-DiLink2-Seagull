@@ -119,10 +119,9 @@ class VoiceControllerEchoFilterTest {
         echoFilter.noteSpoken("открой окно")
         echoFilter.onPlaybackEnd()
 
-        // Start continuous session (this fires earcon.ok() -- clear it before asserting silence below).
+        // Start continuous session (the DiLink 2 branch deliberately has no blocking start earcon).
         controller.onPttPressed()
         awaitSubscribed(fakeContinuousAsr.events)
-        earcon.let { clearMocks(it, answers = false, recordedCalls = true, childMocks = false) }
         fakeContinuousAsr.events.tryEmit(ContinuousAsrEvent.Utterance("открой окно"))
 
         // Wait for the echo check to complete.

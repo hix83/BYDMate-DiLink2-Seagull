@@ -24,4 +24,10 @@ class SteeringWheelKeyDecisionVoiceTest {
     @Test fun ignores_other_keys_key_up() {
         assertEquals(VoiceKeyDecision.IGNORE, voiceDecision(351, isDown = false, voiceEnabled = true, voiceKeyCode = 320))
     }
+    @Test fun consumes_repeated_down_from_a_held_voice_button() {
+        assertEquals(
+            VoiceKeyDecision.CONSUME,
+            voiceDecision(304, isDown = true, voiceEnabled = true, voiceKeyCode = 304, repeatCount = 1),
+        )
+    }
 }

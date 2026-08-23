@@ -75,7 +75,16 @@ enum class VoiceKeyDecision { TRIGGER, CONSUME, IGNORE }
  *  CONSUME on that same key's UP edge — swallowed so it never falls through to the native
  *  BYD assistant, which owns the same hardware keycode. Any other key, or voice disabled,
  *  is IGNORE (pass through untouched). */
-fun voiceDecision(keyCode: Int, isDown: Boolean, voiceEnabled: Boolean, voiceKeyCode: Int): VoiceKeyDecision {
+fun voiceDecision(
+    keyCode: Int,
+    isDown: Boolean,
+    voiceEnabled: Boolean,
+    voiceKeyCode: Int,
+    repeatCount: Int = 0,
+): VoiceKeyDecision {
     if (!voiceEnabled || keyCode != voiceKeyCode) return VoiceKeyDecision.IGNORE
-    return if (isDown) VoiceKeyDecision.TRIGGER else VoiceKeyDecision.CONSUME
+    // DiLink 2 emits another ACTION_DOWN roughly every 215 ms while the steering
+    // button is held. Only the initial edge represents a physical press; consuming
+    // repeats prevents one hold from starting and immediately stopping the agent.
+    return if (isDown && repeatCount == 0) VoiceKeyDecision.TRIGGER else VoiceKeyDecision.CONSUME
 }

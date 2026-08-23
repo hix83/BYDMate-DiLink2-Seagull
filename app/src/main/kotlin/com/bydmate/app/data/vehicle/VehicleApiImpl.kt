@@ -2,6 +2,7 @@ package com.bydmate.app.data.vehicle
 
 import android.util.Log
 import com.bydmate.app.data.autoservice.AutoserviceClient
+import com.bydmate.app.data.autoservice.AdbOnDeviceClient
 import com.bydmate.app.data.autoservice.BatteryReading
 import com.bydmate.app.data.local.dao.VehicleWriteLogDao
 import com.bydmate.app.data.local.entity.VehicleWriteLogEntity
@@ -26,6 +27,7 @@ class VehicleApiImpl @Inject constructor(
     private val writeLogDao: VehicleWriteLogDao,
     private val seatStore: SeatChannelStore,
     private val diPlusControl: DiParsControlClient? = null,
+    private val adbOnDevice: AdbOnDeviceClient? = null,
 ) : VehicleApi {
 
     private val seatChannel = AdaptiveSeatChannel(
@@ -56,18 +58,42 @@ class VehicleApiImpl @Inject constructor(
 
     // ─── Writes ────────────────────────────────────────────────────────────────
 
-    override suspend fun dispatch(commandString: String): Result<Unit> {
-        if (diPlusControl != null &&
-            VehiclePlatformDetector.detect(android.os.Build.VERSION.SDK_INT) ==
-            VehiclePlatform.DILINK2
-        ) {
-            return if (diPlusControl.sendCommand(commandString)) {
-                Result.success(Unit)
-            } else {
-                Result.failure(
+    override suspend fun dispatch(commandString: String): Result<Unit> =
+        dispatchForPlatform(
+            commandString,
+            VehiclePlatformDetector.detect(android.os.Build.VERSION.SDK_INT),
+        )
+
+    internal suspend fun dispatchForPlatform(
+        commandString: String,
+        platform: VehiclePlatform,
+    ): Result<Unit> {
+        if (diPlusControl != null && platform == VehiclePlatform.DILINK2) {
+            if (!diPlusControl.sendCommand(commandString)) {
+                return Result.failure(
                     VehicleWriteError.HelperUnreachable(commandString, "Di+ sendCmd failed")
                 )
             }
+
+            // Di+ 1.3.8 maps 自动空调 to blower/automatic mode only on the Seagull:
+            // it does not press the independent A/C compressor (snowflake) control. After
+            // Di+ has powered the climate stack, use the shell helper's narrow, idempotent
+            // stock-UI operation that we validated live on DiLink 2.
+            if (commandString.removePrefix("迪加") == DILINK2_AC_ON_COMMAND) {
+                val compressorSet = adbOnDevice?.setAcCompressorViaStockUi(true)
+                    ?: helper.setAcCompressor(true)
+                if (!compressorSet) {
+                    Log.w(TAG, "dispatch: Di+ started climate but stock UI compressor action failed")
+                    return Result.failure(
+                        VehicleWriteError.HelperUnreachable(
+                            commandString,
+                            "stock climate compressor action failed",
+                        )
+                    )
+                }
+                Log.i(TAG, "dispatch: DiLink 2 climate and compressor ON confirmed")
+            }
+            return Result.success(Unit)
         }
         CommandTranslator.resolveSeat(commandString)?.let { seat ->
             // Seat writes are switch then level (two binder transacts). Wrap in NonCancellable
@@ -343,6 +369,7 @@ class VehicleApiImpl @Inject constructor(
 
     companion object {
         private const val TAG = "VehicleApiImpl"
+        private const val DILINK2_AC_ON_COMMAND = "自动空调"
         private const val VALIDATED_FAILURE_TAG = "VehicleApi.ValidatedFailure"
         private const val COMPOSITE_WRITE_STAGGER_MS = 150L
         // TODO: route to Crashlytics when Firebase is integrated

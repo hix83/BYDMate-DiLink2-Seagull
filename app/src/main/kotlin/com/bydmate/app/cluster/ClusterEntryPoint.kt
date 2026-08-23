@@ -9,8 +9,9 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 
 /**
- * Bridges the @Singleton HelperClient/HelperBootstrap/VoiceController/HudController into
- * SteeringWheelKeyService and SettingsScreen composables (framework-instantiated, not Hilt).
+ * Bridges app singletons into framework/UI callers that are not constructor-injected.
+ * SteeringWheelKeyService must not request [VoiceController] because it runs in :steering;
+ * main-process callers such as WidgetController may use it directly.
  */
 @EntryPoint
 @InstallIn(SingletonComponent::class)

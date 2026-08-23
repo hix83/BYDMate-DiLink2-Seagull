@@ -1,8 +1,10 @@
 package com.bydmate.app.voice
 
+import android.media.AudioManager
 import android.media.AudioTrack
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -71,8 +73,45 @@ class SherpaTtsEngineTest {
     }
 
     @Test
-    fun `BYD_STREAM_BTTS is 17`() {
-        assertEquals(17, SherpaTtsEngine.BYD_STREAM_BTTS)
+    fun `BYD_STREAM_BTTS is native policy stream 16`() {
+        assertEquals(16, SherpaTtsEngine.BYD_STREAM_BTTS)
+    }
+
+    @Test
+    fun `DiLink2 speech uses vendor navigation stream`() {
+        assertEquals(14, SherpaTtsEngine.DILINK2_TTS_STREAM)
+    }
+
+    @Test
+    fun `voice stream volume is acquired once and restored`() {
+        val audio = mockk<AudioManager>()
+        every { audio.getStreamVolume(14) } returns 4
+        every { audio.getStreamMaxVolume(14) } returns 10
+        every { audio.setStreamVolume(14, any(), 0) } returns Unit
+        val engine = SherpaTtsEngine(modelManager, audioManager = audio)
+
+        engine.acquireVoiceStreamVolume()
+        engine.acquireVoiceStreamVolume()
+        engine.restoreVoiceStreamVolume()
+
+        verify(exactly = 1) { audio.getStreamVolume(14) }
+        verify(exactly = 1) { audio.setStreamVolume(14, 10, 0) }
+        verify(exactly = 1) { audio.setStreamVolume(14, 4, 0) }
+    }
+
+    @Test
+    fun `voice stream target is clamped to firmware maximum`() {
+        val audio = mockk<AudioManager>()
+        every { audio.getStreamVolume(14) } returns 7
+        every { audio.getStreamMaxVolume(14) } returns 6
+        every { audio.setStreamVolume(14, any(), 0) } returns Unit
+        val engine = SherpaTtsEngine(modelManager, audioManager = audio)
+
+        engine.acquireVoiceStreamVolume()
+        engine.restoreVoiceStreamVolume()
+
+        verify { audio.setStreamVolume(14, 6, 0) }
+        verify { audio.setStreamVolume(14, 7, 0) }
     }
 
     // --- Fix wave 2, finding 1: barge-in must free the drain loop promptly, not spin the timeout ---
@@ -440,6 +479,39 @@ class SherpaTtsEngineTest {
         assertEquals(2, written)
     }
 
+    @Test
+    fun `output gain raises quiet PCM and limits peaks`() {
+        val boosted = SherpaTtsEngine.applyOutputGain(
+            floatArrayOf(0f, 0.25f, -0.5f, 0.75f, -1f),
+            gain = 1.8f,
+        )
+
+        assertArrayEquals(floatArrayOf(0f, 0.45f, -0.9f, 1f, -1f), boosted, 0.0001f)
+    }
+
+    @Test
+    fun `output gain sanitizes non finite samples`() {
+        val boosted = SherpaTtsEngine.applyOutputGain(
+            floatArrayOf(Float.NaN, Float.POSITIVE_INFINITY, Float.NEGATIVE_INFINITY),
+        )
+
+        assertArrayEquals(floatArrayOf(0f, 0f, 0f), boosted, 0f)
+    }
+
+    @Test
+    fun `writeSentence sends boosted PCM to the audio writer`() {
+        var writtenSamples = floatArrayOf()
+        SherpaTtsEngine.writeSentence(
+            samples = floatArrayOf(0.25f, -0.5f),
+            write = { writtenSamples = it; it.size },
+            publish = {},
+            stillCurrent = { true },
+            retract = {},
+        )
+
+        assertArrayEquals(floatArrayOf(0.25f, -0.5f), writtenSamples, 0.0001f)
+    }
+
     // --- Task 5: dataDir only for PIPER (espeak-ng-data); VITS_MULTI ships no espeak data ---
 
     @Test
@@ -626,6 +698,32 @@ class SherpaTtsEngineTest {
             Thread.sleep(20)
         }
         io.mockk.verify(exactly = 1) { track.release() }
+    }
+
+    @Test
+    fun `stop skips blocking HAL silence calls when the track is already idle`() {
+        val mm = mockk<TtsModelManager>(relaxed = true) { every { isReady(any()) } returns true }
+        val engine = SherpaTtsEngine(mm)
+        val track = mockk<AudioTrack>(relaxed = true)
+        engine.primeAudibleStateForTest(track = track, speaking = false, pendingTargetFrames = -1L)
+
+        engine.stop()
+
+        io.mockk.verify(exactly = 0) { track.pause() }
+        io.mockk.verify(exactly = 0) { track.flush() }
+    }
+
+    @Test
+    fun `stop synchronously silences an active track for barge in`() {
+        val mm = mockk<TtsModelManager>(relaxed = true) { every { isReady(any()) } returns true }
+        val engine = SherpaTtsEngine(mm)
+        val track = mockk<AudioTrack>(relaxed = true)
+        engine.primeAudibleStateForTest(track = track, speaking = true, pendingTargetFrames = 1_000L)
+
+        engine.stop()
+
+        io.mockk.verify(exactly = 1) { track.pause() }
+        io.mockk.verify(exactly = 1) { track.flush() }
     }
 
     // --- Final review fix, finding 2: the offline queue's enqueue() reused a non-null track

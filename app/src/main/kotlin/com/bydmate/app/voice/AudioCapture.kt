@@ -11,6 +11,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlin.concurrent.thread
 
+internal enum class AudioReadDecision { EMIT, RETRY, STOP }
+
+internal fun audioReadDecision(result: Int): AudioReadDecision = when {
+    result > 0 -> AudioReadDecision.EMIT
+    result == 0 -> AudioReadDecision.RETRY
+    else -> AudioReadDecision.STOP
+}
+
 class AudioCapture(private val audioManager: AudioManager, private val prefs: SharedPreferences) {
 
     companion object {
@@ -101,7 +109,18 @@ class AudioCapture(private val audioManager: AudioManager, private val prefs: Sh
             try {
                 while (!isClosedForSend) {
                     val n = record.read(buf, 0, buf.size)
-                    if (n > 0) trySend(buf.copyOf(n))
+                    when (audioReadDecision(n)) {
+                        AudioReadDecision.EMIT -> trySend(buf.copyOf(n))
+                        AudioReadDecision.RETRY -> Thread.yield()
+                        AudioReadDecision.STOP -> {
+                            // Android 9/DiLink 2 returns -38 when AudioRecord becomes invalid.
+                            // Retrying a fatal read in a tight loop flooded logcat and left the
+                            // voice session looking alive although no microphone data could arrive.
+                            Log.w(TAG, "AudioRecord read failed: $n; closing capture")
+                            close(IllegalStateException("AudioRecord read failed: $n"))
+                            break
+                        }
+                    }
                     if ((System.nanoTime() - start) / 1_000_000 >= maxMs) break
                 }
             } finally {
@@ -148,6 +167,18 @@ class AudioCapture(private val audioManager: AudioManager, private val prefs: Sh
     // internal for direct unit tests
     internal fun restoreMusic(saved: Int?): Unit = synchronized(duckLock) {
         saved ?: return
+        // Physical steering-wheel volume keys bypass applyExplicitVolume() and write the system
+        // stream directly. If the live stream is no longer at our duck index, treat that value as
+        // the user's latest choice instead of overwriting it with the pre-session snapshot. This
+        // also handles volume-down to zero and nested listen-window ducks.
+        val current = if (duckDepth > 0) {
+            runCatching { audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) }.getOrNull()
+        } else null
+        if (current != null && current != DUCK_VOLUME_INDEX && current != pendingRestore) {
+            pendingRestore = current
+            prefs.edit().putInt(KEY_PRE_DUCK_VOLUME, current).apply()
+            Log.i(TAG, "restoreMusic: detected manual volume override -> $current")
+        }
         duckDepth = (duckDepth - 1).coerceAtLeast(0)
         val target = pendingRestore ?: saved
         val restored = runCatching {

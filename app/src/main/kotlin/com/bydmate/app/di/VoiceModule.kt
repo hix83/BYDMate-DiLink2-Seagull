@@ -91,6 +91,7 @@ object VoiceModule {
             liveliness = { prefs().getInt("tts_liveliness", 33) },
             marker = marker,
             loadGuard = ttsGuard,
+            audioManager = ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager,
         )
         return TtsRouter(
             delegate = offline,

@@ -251,6 +251,19 @@ class VoiceController @Inject constructor(
         }
     }
 
+    /** Steering-wheel button semantics are intentionally idempotent: the button calls/wakes the
+     * agent, it is not the session's OFF switch. A continuous session remains open for follow-up
+     * speech for up to [SILENCE_AUTOSTOP_MS], so treating the next steering press as OFF produced
+     * the field-visible "works every other time" pattern on DiLink 2. The session still stops on
+     * silence and on its existing explicit hard-stop paths. */
+    fun onSteeringPttPressed() {
+        if (_listening.value) {
+            Log.i(TAG, "steering PTT: session already listening; keeping it active")
+            return
+        }
+        onPttPressed()
+    }
+
     /** Continuous PTT-toggled session (Wave B): one long-lived mic capture feeds VAD-segmented
      *  utterances into the shared NLU/agent router (routeUtterance), so a follow-up question from
      *  the agent keeps listening for free — the loop just collects again. Auto-stops after
@@ -267,7 +280,12 @@ class VoiceController @Inject constructor(
         stopRequested.set(false)
         _state.value = VoiceUiState.Listening
         _listening.value = true
-        earcon.ok()
+        // Do not play the start earcon on the caller thread. DiLink 2's ToneGenerator blocks
+        // for ~3 seconds when another media app (notably Yandex Music) owns audio focus, delaying
+        // both ducking and microphone startup. Moving it to a background thread is not safe: the
+        // delayed beep then lands in the already-open mic and is recognized as speech. The
+        // listening overlay is the immediate start acknowledgement on this branch; result/error
+        // earcons elsewhere remain unchanged.
         // Duck the music the instant the orb appears -- captureSession's own duck fires only after
         // the GigaAM recognizer is constructed (~1.3 s, field defect APK 337). duckMusic() is
         // idempotent (volume already at the duck target returns null), so the inner call becomes

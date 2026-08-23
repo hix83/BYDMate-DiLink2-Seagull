@@ -591,8 +591,9 @@ class VoiceControllerSessionTest {
         val fakeAsr = FakeContinuousAsr(ready = true)
         val dispatcher = mockk<ActionDispatcher>(relaxed = true)
         val audioCapture = mockk<AudioCapture>(relaxed = true)
+        val earcon = mockk<VoiceEarcon>(relaxed = true)
         every { audioCapture.captureSession(any()) } returns flow { }
-        val controller = makeController(fakeAsr, dispatcher, audioCapture = audioCapture)
+        val controller = makeController(fakeAsr, dispatcher, audioCapture = audioCapture, earcon = earcon)
 
         controller.onPttPressed()
         // `listening` flips synchronously in startContinuousSession(), before the launched
@@ -601,6 +602,7 @@ class VoiceControllerSessionTest {
         // Wave P: no hard session cap; Long.MAX_VALUE means "run until silence or user stops".
         awaitVerify { verify(exactly = 1) { audioCapture.captureSession(Long.MAX_VALUE) } }
         assertTrue(controller.listening.value)
+        verify(exactly = 0) { earcon.ok() }
     }
 
     @Test fun `stopping the session cancels pcm collection`() {
@@ -624,6 +626,27 @@ class VoiceControllerSessionTest {
         val framesBefore = fakeAsr.recordedFrames.size
         rawFrames.tryEmit(shortArrayOf(9, 9, 9))
         assertEquals(framesBefore, fakeAsr.recordedFrames.size)
+    }
+
+    @Test fun `steering PTT while already listening keeps the active session`() {
+        val fakeAsr = FakeContinuousAsr(ready = true)
+        val dispatcher = mockk<ActionDispatcher>(relaxed = true)
+        val rawFrames = MutableSharedFlow<ShortArray>(extraBufferCapacity = 8)
+        val audioCapture = mockk<AudioCapture>(relaxed = true)
+        every { audioCapture.captureSession(any()) } returns rawFrames
+        val controller = makeController(fakeAsr, dispatcher, audioCapture = audioCapture)
+
+        controller.onSteeringPttPressed()
+        awaitTrue { fakeAsr.collecting }
+        controller.onSteeringPttPressed()
+
+        assertTrue(controller.listening.value)
+        assertTrue(fakeAsr.collecting)
+        verify(exactly = 1) { audioCapture.captureSession(Long.MAX_VALUE) }
+
+        // Preserve the explicit toggle API's existing hard-stop contract for callers/tests.
+        controller.onPttPressed()
+        awaitTrue { !controller.listening.value }
     }
 
     @Test fun `frames arriving while tts is speaking never reach the recognizer`() {
