@@ -1074,4 +1074,13 @@
     <string name="settings_hud_hint">Requer versão com head-up display. Os dados vêm da janela do Yandex Navigator</string>
     <string name="settings_secret_show">Mostrar chave</string>
     <string name="settings_secret_hide">Ocultar chave</string>
+    <string name="settings_adb_restore_title">Restaurar o ADB após reiniciar</string>
+    <string name="settings_adb_restore_desc">Para firmware que desativa o ADB após cada reinício. O Wi‑Fi deve estar ligado.</string>
+    <string name="settings_adb_restore_status_not_needed">Não é necessário: o ADB já funciona</string>
+    <string name="settings_adb_restore_status_needs_activation">É necessário ativar: ligue o ADB uma vez e reinicie a aplicação</string>
+    <string name="settings_adb_restore_status_waiting_wifi">À espera de Wi‑Fi</string>
+    <string name="settings_adb_restore_status_needs_dialog">Confirme a caixa de depuração sem fios no ecrã</string>
+    <string name="settings_adb_restore_status_connecting">A restaurar…</string>
+    <string name="settings_adb_restore_status_restored">Restaurado às %1$s</string>
+    <string name="settings_adb_restore_status_failed">Erro: %1$s</string>
 </resources>

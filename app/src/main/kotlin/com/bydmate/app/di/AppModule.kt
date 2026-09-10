@@ -524,4 +524,25 @@ object AppModule {
     ): com.bydmate.app.data.vehicle.HelperBootstrap =
         com.bydmate.app.data.vehicle.HelperBootstrap(adb, helper, context)
 
+    @Provides
+    @Singleton
+    fun provideAdbRestorePreferences(
+        @ApplicationContext context: Context,
+    ): com.bydmate.app.data.autoservice.AdbRestorePreferences =
+        com.bydmate.app.data.autoservice.AdbRestorePreferencesImpl(context)
+
+    @Provides
+    @Singleton
+    @com.bydmate.app.data.autoservice.AdbRestoreScope
+    fun provideAdbRestoreScope(): kotlinx.coroutines.CoroutineScope =
+        kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+        )
+
+    @Provides
+    @Singleton
+    fun provideAdbRestoreSystem(
+        implementation: com.bydmate.app.data.autoservice.AndroidAdbRestoreSystem,
+    ): com.bydmate.app.data.autoservice.AdbRestoreSystem = implementation
+
 }

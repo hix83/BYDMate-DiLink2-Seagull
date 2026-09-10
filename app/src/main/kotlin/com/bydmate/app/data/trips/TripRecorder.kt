@@ -103,10 +103,14 @@ class TripRecorder @Inject constructor(
         val distance = if (open.startMileage != null && end.mileage != null)
             (end.mileage - open.startMileage).coerceAtLeast(0.0) else null
         val per100 = if (kwh != null && distance != null && distance > 0) kwh / distance * 100.0 else null
-        tripDao.insert(
+        val endTs = now()
+        // DiLink 2 can expose the same completed drive through Di+ before the native
+        // recorder observes DRIVE -> ACC. Do not append a second row: dashboard period
+        // summaries sum rows and would otherwise show almost exactly double mileage.
+        insertNativeUnlessDiPlus(
             TripEntity(
                 startTs = open.startTs,
-                endTs = now(),
+                endTs = endTs,
                 distanceKm = distance,
                 kwhConsumed = kwh,
                 kwhPer100km = per100,
@@ -137,7 +141,7 @@ class TripRecorder @Inject constructor(
             val distance = if (state.tripStartMileage != null && state.mileage != null)
                 (state.mileage - state.tripStartMileage).coerceAtLeast(0.0) else null
             val per100 = if (kwh != null && distance != null && distance > 0) kwh / distance * 100.0 else null
-            tripDao.insert(
+            insertNativeUnlessDiPlus(
                 TripEntity(
                     startTs = state.tripStartTs,
                     endTs = state.ts,
@@ -151,5 +155,20 @@ class TripRecorder @Inject constructor(
             )
         }
         lastStateDao.clearOpenTrip()
+    }
+
+    private suspend fun insertNativeUnlessDiPlus(trip: TripEntity) {
+        val endTs = trip.endTs ?: trip.startTs
+        val diPlusTrips = tripDao.findSourceTripOverlappingNearStart(
+            source = TripSource.DIPLUS,
+            startTs = trip.startTs,
+            endTs = endTs,
+            windowMs = DIPLUS_DEDUP_WINDOW_MS,
+        )
+        if (diPlusTrips.isEmpty()) tripDao.insert(trip)
+    }
+
+    private companion object {
+        const val DIPLUS_DEDUP_WINDOW_MS = 5 * 60 * 1_000L
     }
 }

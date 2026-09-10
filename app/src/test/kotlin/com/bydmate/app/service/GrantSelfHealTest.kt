@@ -26,6 +26,21 @@ class GrantSelfHealTest {
     }
 
     @Test
+    fun `forced wake reasserts once even when cached state says granted`() = runTest {
+        var reassertCount = 0
+        val heal = GrantSelfHeal(
+            name = "test",
+            isGranted = { true },
+            reassert = { reassertCount++; true },
+            retryDelayMs = 1_000L,
+        )
+
+        heal.ensure("wake", forceFirstReassert = true)
+
+        assertEquals(1, reassertCount)
+    }
+
+    @Test
     fun `grant appears after two failures - loop stops early`() = runTest {
         var checkCount = 0
         var reassertCount = 0

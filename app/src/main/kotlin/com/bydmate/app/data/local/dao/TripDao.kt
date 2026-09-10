@@ -68,6 +68,44 @@ interface TripDao {
     @Query("SELECT * FROM trips WHERE start_ts >= :minTs AND start_ts <= :maxTs LIMIT 1")
     suspend fun getByStartTsRange(minTs: Long, maxTs: Long): TripEntity?
 
+    /** Finds a Di+ row representing the same drive as a native recorder row.
+     *  The start-time window handles the small clock/detection skew seen on DiLink 2;
+     *  interval overlap prevents two legitimate consecutive short trips from matching. */
+    @Query("""
+        SELECT * FROM trips
+        WHERE source = :source
+          AND ABS(start_ts - :startTs) <= :windowMs
+          AND COALESCE(end_ts, start_ts) >= :startTs
+          AND :endTs >= start_ts
+        ORDER BY ABS(start_ts - :startTs)
+        LIMIT 1
+    """)
+    suspend fun findSourceTripOverlappingNearStart(
+        source: String,
+        startTs: Long,
+        endTs: Long,
+        windowMs: Long,
+    ): List<TripEntity>
+
+    /** Removes historical DiLink 2 duplicates where Di+ and native polling recorded
+     *  the same overlapping drive. Safe to run after every sync (idempotent). */
+    @Query("""
+        DELETE FROM trips
+        WHERE source = :nativeSource
+          AND EXISTS (
+              SELECT 1 FROM trips AS di
+              WHERE di.source = :diPlusSource
+                AND ABS(di.start_ts - trips.start_ts) <= :windowMs
+                AND COALESCE(di.end_ts, di.start_ts) >= trips.start_ts
+                AND COALESCE(trips.end_ts, trips.start_ts) >= di.start_ts
+          )
+    """)
+    suspend fun deleteNativeDuplicatesOfDiPlus(
+        nativeSource: String,
+        diPlusSource: String,
+        windowMs: Long,
+    ): Int
+
     @Query("SELECT * FROM trips ORDER BY start_ts")
     suspend fun getAllSnapshot(): List<TripEntity>
 

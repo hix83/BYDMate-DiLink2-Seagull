@@ -1231,4 +1231,13 @@
     <string name="settings_hud_hint">Нужна комплектация с проекционным дисплеем. Данные берутся из окна Яндекс Навигатора</string>
     <string name="settings_secret_show">Показать ключ</string>
     <string name="settings_secret_hide">Скрыть ключ</string>
+    <string name="settings_adb_restore_title">Восстанавливать ADB после перезагрузки</string>
+    <string name="settings_adb_restore_desc">Для прошивок, где ADB выключается при каждой перезагрузке. Нужен включённый Wi‑Fi. При первом запуске подтвердите системный диалог и выберите «Всегда разрешать в этой сети».</string>
+    <string name="settings_adb_restore_status_not_needed">Не требуется: ADB уже работает</string>
+    <string name="settings_adb_restore_status_needs_activation">Нужна активация: подключите ADB один раз и перезапустите приложение</string>
+    <string name="settings_adb_restore_status_waiting_wifi">Ожидание Wi‑Fi</string>
+    <string name="settings_adb_restore_status_needs_dialog">Подтвердите диалог беспроводной отладки на экране</string>
+    <string name="settings_adb_restore_status_connecting">Восстанавливаем…</string>
+    <string name="settings_adb_restore_status_restored">Восстановлено в %1$s</string>
+    <string name="settings_adb_restore_status_failed">Ошибка: %1$s</string>
 </resources>

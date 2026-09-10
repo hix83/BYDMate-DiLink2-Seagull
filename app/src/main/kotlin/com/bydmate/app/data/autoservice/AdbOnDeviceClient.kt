@@ -39,9 +39,24 @@ interface AdbOnDeviceClient {
      */
     suspend fun grantUsageStatsAppop(packageName: String): Boolean
 
+    /** Grants the app permission needed to toggle Android wireless debugging after reboot. */
+    suspend fun grantWriteSecureSettings(packageName: String): Boolean = false
+
+    /** Temporarily gates RECORD_AUDIO for known Yandex apps while BYDMate owns the microphone.
+     * Package names and the app-op are hardcoded; this is not a generic shell surface. */
+    suspend fun setYandexMicrophoneBlocked(blocked: Boolean): Boolean = false
+
+    /** Force-rebinds only BYDMate's steering AccessibilityService through the already-authorized
+     * on-device ADB channel. Fallback for early boot when the helper binder is not alive yet. */
+    suspend fun rebindSteeringAccessibility(): Boolean = false
+
     /** Idempotently sets the stock DiLink 2 compressor (snowflake) through a hardcoded
      *  climate-UI sequence under the on-device ADB shell uid. */
     suspend fun setAcCompressorViaStockUi(enable: Boolean): Boolean = false
+
+    /** Sets the DiLink 2 cabin blower through the shell-uid autoservice channel.
+     * Narrow hardcoded write: only levels 1..7 and the proven blower FID. */
+    suspend fun setClimateFanLevel(level: Int): Boolean = false
 
     /**
      * Spawns the helper daemon under shell uid via app_process, using the app's
@@ -89,7 +104,10 @@ class AdbOnDeviceClientImpl @Inject constructor(
      */
     @Suppress("unused")  // assigned via internal setter from tests
     internal var protocolFactory: () -> AdbProtocol = {
-        AdbProtocolClient(keyStore.loadOrGenerate())
+        AdbProtocolClient(
+            keyPair = keyStore.loadOrGenerate(),
+            certificateProvider = { keyStore.loadOrGenerateCertificate() },
+        )
     }
 
     @Volatile private var protocol: AdbProtocol? = null
@@ -151,6 +169,90 @@ class AdbOnDeviceClientImpl @Inject constructor(
         }
     }
 
+    override suspend fun grantWriteSecureSettings(packageName: String): Boolean = withContext(Dispatchers.IO) {
+        require(packageName.matches(PACKAGE_NAME_REGEX)) {
+            "grantWriteSecureSettings: refused package $packageName"
+        }
+        val p = protocol ?: run {
+            if (connect().isFailure) return@withContext false
+            protocol ?: return@withContext false
+        }
+        runCatching {
+            // `pm grant` is silent both on success and on an idempotent re-grant.
+            p.exec("pm grant $packageName android.permission.WRITE_SECURE_SETTINGS")?.isBlank() == true
+        }.onFailure { Log.w(TAG, "grantWriteSecureSettings failed: ${it.message}") }
+            .getOrDefault(false)
+    }
+
+    override suspend fun setYandexMicrophoneBlocked(blocked: Boolean): Boolean = withContext(Dispatchers.IO) {
+        val p = protocol ?: run {
+            val connected = connect()
+            if (connected.isFailure) return@withContext false
+            protocol ?: return@withContext false
+        }
+        val mode = if (blocked) "ignore" else "allow"
+        var installed = 0
+        var allApplied = true
+        try {
+            for (packageName in YANDEX_MIC_PACKAGES) {
+                val path = p.exec("pm path $packageName")
+                if (path == null) {
+                    allApplied = false
+                    continue
+                }
+                if (!path.startsWith("package:")) continue
+                installed++
+                val out = p.exec("appops set $packageName RECORD_AUDIO $mode")
+                if (out == null || out.isNotBlank()) allApplied = false
+            }
+            Log.i(TAG, "Yandex microphone app-op: blocked=$blocked installed=$installed ok=$allApplied")
+            installed > 0 && allApplied
+        } catch (e: Exception) {
+            Log.w(TAG, "Yandex microphone app-op failed: ${e.message}")
+            false
+        }
+    }
+
+    override suspend fun rebindSteeringAccessibility(): Boolean = withContext(Dispatchers.IO) {
+        val p = protocol ?: run {
+            val connected = connect()
+            if (connected.isFailure) return@withContext false
+            protocol ?: return@withContext false
+        }
+        try {
+            val currentRaw = p.exec("settings get secure enabled_accessibility_services")
+                ?: return@withContext false
+            val current = currentRaw.trim().takeUnless { it == "null" }.orEmpty()
+            val others = current.split(':')
+                .filter { it.isNotBlank() && canonicalAccessibilityComponent(it) != STEERING_A11Y_CANONICAL }
+            val without = others.joinToString(":")
+            val withBydMate = (others + STEERING_A11Y_COMPONENT).joinToString(":")
+            if (p.exec("settings put secure enabled_accessibility_services ${shellQuote(without)}") == null) {
+                return@withContext false
+            }
+            // 200 ms was occasionally swallowed by DiLink 2 during cold wake. The proven
+            // on-car manual-equivalent cycle needs a full second between removal and re-add.
+            Thread.sleep(1_000L)
+            if (p.exec("settings put secure enabled_accessibility_services ${shellQuote(withBydMate)}") == null) {
+                return@withContext false
+            }
+            if (p.exec("settings put secure accessibility_enabled 1") == null) return@withContext false
+            repeat(6) {
+                val connected = p.exec(STEERING_A11Y_DUMPSYS_CHECK)?.trim() == "connected"
+                if (connected) {
+                    Log.i(TAG, "Steering accessibility rebound through on-device ADB")
+                    return@withContext true
+                }
+                Thread.sleep(500L)
+            }
+            Log.w(TAG, "Steering accessibility rebind dispatched but :steering did not start")
+            false
+        } catch (e: Exception) {
+            Log.w(TAG, "Steering accessibility ADB rebind failed: ${e.message}")
+            false
+        }
+    }
+
     override suspend fun setAcCompressorViaStockUi(enable: Boolean): Boolean = withContext(Dispatchers.IO) {
         val p = protocol ?: run {
             val connected = connect()
@@ -192,6 +294,44 @@ class AdbOnDeviceClientImpl @Inject constructor(
         } finally {
             runCatching { p.exec("input keyevent BACK") }
             runCatching { p.exec("rm -f $dumpPath") }
+        }
+    }
+
+    override suspend fun setClimateFanLevel(level: Int): Boolean = withContext(Dispatchers.IO) {
+        require(level in CLIMATE_FAN_MIN..CLIMATE_FAN_MAX) {
+            "setClimateFanLevel: level must be $CLIMATE_FAN_MIN..$CLIMATE_FAN_MAX"
+        }
+        val p = protocol ?: run {
+            val connected = connect()
+            if (connected.isFailure) return@withContext false
+            protocol ?: return@withContext false
+        }
+        try {
+            // Deliberately bypass public exec()'s read-only barrier through this one
+            // narrow API. Live-validated on the connected DiLink 2: tx=6 returns 1
+            // and read FID 1077936156 changes to the requested stage.
+            val write = p.exec(
+                "service call autoservice 6 i32 $CLIMATE_DEV i32 $CLIMATE_FAN_WRITE_FID i32 $level"
+            ) ?: return@withContext false
+            if (!write.contains("Parcel(00000001")) {
+                Log.w(TAG, "blower write rejected: $write")
+                return@withContext false
+            }
+            repeat(5) {
+                val read = p.exec(
+                    "service call autoservice 5 i32 $CLIMATE_DEV i32 $CLIMATE_FAN_READ_FID"
+                )
+                if (parseAutoserviceReadInt(read) == level) {
+                    Log.i(TAG, "DiLink 2 blower level confirmed: $level")
+                    return@withContext true
+                }
+                Thread.sleep(150L)
+            }
+            Log.w(TAG, "blower write accepted but readback did not reach $level")
+            false
+        } catch (e: Exception) {
+            Log.w(TAG, "setClimateFanLevel failed: ${e.message}")
+            false
         }
     }
 
@@ -278,12 +418,44 @@ class AdbOnDeviceClientImpl @Inject constructor(
         // Rejects tx=6 (setInt), tx=8 (setBuffer), and arbitrary shell.
         private val WRITE_BARRIER_REGEX = Regex("""^service call autoservice [579] i32 \d+ i32 -?\d+$""")
 
-        // Narrow whitelist for grantUsageStatsAppop — only our own package.
+        // Narrow whitelist for self-grants — only our own package.
         private val PACKAGE_NAME_REGEX = Regex("""^com\.bydmate\.app$""")
 
         // Helper daemon — hardcoded so neither caller can inject paths/cmdlines.
         private const val HELPER_PROCESS_NAME = "bydmate_helper"
         private const val HELPER_LOG_PATH = "/data/local/tmp/bydmate_helper.log"
         private const val AC_UI_DUMP_PATH = "/data/local/tmp/bydmate_ac_ui.xml"
+        private const val CLIMATE_DEV = 1000
+        private const val CLIMATE_FAN_WRITE_FID = 501219340
+        private const val CLIMATE_FAN_READ_FID = 1077936156
+        private const val CLIMATE_FAN_MIN = 1
+        private const val CLIMATE_FAN_MAX = 7
+        private const val STEERING_A11Y_COMPONENT =
+            "com.bydmate.app/com.bydmate.app.cluster.SteeringWheelKeyService"
+        private const val STEERING_A11Y_CANONICAL = STEERING_A11Y_COMPONENT
+        private const val STEERING_A11Y_DUMPSYS_CHECK =
+            "dumpsys accessibility | grep -q 'Service\\[label=BYDMate' && echo connected"
+        private val YANDEX_MIC_PACKAGES = listOf(
+            "ru.yandex.yandexnavi",
+            "ru.yandex.yandexmaps",
+            "ru.yandex.music",
+        )
+
+        internal fun canonicalAccessibilityComponent(raw: String): String {
+            val slash = raw.indexOf('/')
+            if (slash <= 0 || slash == raw.lastIndex) return raw
+            val pkg = raw.substring(0, slash)
+            val cls = raw.substring(slash + 1).let { if (it.startsWith('.')) pkg + it else it }
+            return "$pkg/$cls"
+        }
+
+        internal fun parseAutoserviceReadInt(output: String?): Int? {
+            val hex = Regex("""Parcel\([0-9a-fA-F]{8}\s+([0-9a-fA-F]{8})""")
+                .find(output.orEmpty())?.groupValues?.get(1) ?: return null
+            return hex.toLongOrNull(16)?.toInt()
+        }
+
+        private fun shellQuote(value: String): String =
+            "'" + value.replace("'", "'\\''") + "'"
     }
 }

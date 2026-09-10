@@ -20,9 +20,13 @@ class GrantSelfHeal(
     private val attempts: Int = ATTEMPTS,
     private val retryDelayMs: Long = RETRY_MS,
 ) {
-    suspend fun ensure(reason: String) {
+    suspend fun ensure(reason: String, forceFirstReassert: Boolean = false) {
         repeat(attempts) { attempt ->
-            if (runCatching { isGranted() }.getOrDefault(false)) {
+            // Quickboot can preserve an app-side "connected" flag after AccessibilityManager
+            // has silently lost the key-event filter. A wake-triggered forced first write is the
+            // programmatic equivalent of toggling the Accessibility switch off/on.
+            val mustReassert = forceFirstReassert && attempt == 0
+            if (!mustReassert && runCatching { isGranted() }.getOrDefault(false)) {
                 if (attempt > 0) Log.i(TAG, "$name confirmed granted ($reason, try ${attempt + 1})")
                 return
             }

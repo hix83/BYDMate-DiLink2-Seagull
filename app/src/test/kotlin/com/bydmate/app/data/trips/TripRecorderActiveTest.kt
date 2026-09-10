@@ -7,6 +7,7 @@ import com.bydmate.app.data.local.dao.TripDao
 import com.bydmate.app.data.local.entity.TripEntity
 import com.bydmate.app.data.remote.diParsData
 import io.mockk.coVerify
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -123,6 +124,29 @@ class TripRecorderActiveTest {
         rec.consume(diParsData(powerState = 2, soc = 80, mileage = 100.0))  // DRIVE -> open
         rec.consume(diParsData(powerState = 0, soc = 75, mileage = 105.0))  // OFF -> close
         coVerify(exactly = 1) { tripDao.insert(any()) }
+        coVerify(exactly = 1) { lastState.clearOpenTrip() }
+    }
+
+    @Test fun `matching DiPlus row prevents duplicate native trip`() = runTest {
+        val (rec, tripDao, lastState) = setup()
+        coEvery {
+            tripDao.findSourceTripOverlappingNearStart(
+                TripSource.DIPLUS, 1_000L, 2_000L, 300_000L
+            )
+        } returns listOf(
+            TripEntity(
+                id = 42L,
+                startTs = 990L,
+                endTs = 2_010L,
+                distanceKm = 10.0,
+                source = TripSource.DIPLUS,
+            )
+        )
+
+        rec.consume(diParsData(powerState = 2, soc = 80, mileage = 100.0))
+        rec.consume(diParsData(powerState = 1, soc = 70, mileage = 110.0))
+
+        coVerify(exactly = 0) { tripDao.insert(any()) }
         coVerify(exactly = 1) { lastState.clearOpenTrip() }
     }
 }

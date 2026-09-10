@@ -90,4 +90,53 @@ class VehicleApiDilink2CompressorTest {
         coVerify(exactly = 1) { adb.setAcCompressorViaStockUi(true) }
         coVerify(exactly = 0) { helper.setAcCompressor(any()) }
     }
+
+    @Test
+    fun `DiLink 2 blower bypasses false-success DiPlus and requires native readback`() = runTest {
+        val adb = mockk<AdbOnDeviceClient>()
+        val apiWithAdb = VehicleApiImpl(
+            parsReader = mockk<ParsReader>(relaxed = true),
+            autoservice = mockk<AutoserviceClient>(relaxed = true),
+            helper = helper,
+            allowlist = WriteAllowlist.EMPTY,
+            writeLogDao = mockk<VehicleWriteLogDao>(relaxed = true),
+            seatStore = object : SeatChannelStore {
+                override fun winner() = SeatChannel.UNKNOWN
+                override fun setWinner(channel: SeatChannel) = Unit
+            },
+            diPlusControl = diPlus,
+            adbOnDevice = adb,
+        )
+        coEvery { adb.setClimateFanLevel(2) } returns true
+
+        val result = apiWithAdb.dispatchForPlatform("设置风量2", VehiclePlatform.DILINK2)
+
+        assertTrue(result.isSuccess)
+        coVerify(exactly = 1) { adb.setClimateFanLevel(2) }
+        coVerify(exactly = 0) { diPlus.sendCommand(any()) }
+    }
+
+    @Test
+    fun `DiLink 2 blower reports failure when native readback fails`() = runTest {
+        val adb = mockk<AdbOnDeviceClient>()
+        val apiWithAdb = VehicleApiImpl(
+            parsReader = mockk<ParsReader>(relaxed = true),
+            autoservice = mockk<AutoserviceClient>(relaxed = true),
+            helper = helper,
+            allowlist = WriteAllowlist.EMPTY,
+            writeLogDao = mockk<VehicleWriteLogDao>(relaxed = true),
+            seatStore = object : SeatChannelStore {
+                override fun winner() = SeatChannel.UNKNOWN
+                override fun setWinner(channel: SeatChannel) = Unit
+            },
+            diPlusControl = diPlus,
+            adbOnDevice = adb,
+        )
+        coEvery { adb.setClimateFanLevel(4) } returns false
+
+        val result = apiWithAdb.dispatchForPlatform("设置风量4", VehiclePlatform.DILINK2)
+
+        assertTrue(result.isFailure)
+        coVerify(exactly = 0) { diPlus.sendCommand(any()) }
+    }
 }

@@ -30,8 +30,8 @@ android {
         // on DiLink Android 12 (requestLegacyExternalStorage works).
         // targetSdk 30+ would break listFiles() on /storage/emulated/0/energydata/
         targetSdk = 29
-        versionCode = 385
-        versionName = "3.8.3"
+        versionCode = 386
+        versionName = "3.8.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -144,6 +144,14 @@ android {
         compose = true
         buildConfig = true
     }
+
+    packaging {
+        resources.excludes += setOf(
+            "META-INF/LICENSE.md",
+            "META-INF/NOTICE.md",
+            "META-INF/versions/**",
+        )
+    }
 }
 
 // AC-12: a publishable release APK must be signed. Debug and CI builds are
@@ -210,6 +218,9 @@ dependencies {
 
     // AppCompat (required for AppCompatDelegate.setApplicationLocales per-app language support)
     implementation("androidx.appcompat:appcompat:1.6.1")
+
+    // Builds the self-signed certificate used by Android wireless-debugging STLS.
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.85")
 
     // Hidden-API bypass: allows in-process ServiceManager.getService() on Android 9+
     // to reach the helper binder without UnsatisfiedLinkError / NoSuchMethodError.

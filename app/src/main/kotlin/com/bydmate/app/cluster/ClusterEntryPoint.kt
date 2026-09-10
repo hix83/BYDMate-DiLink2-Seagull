@@ -20,4 +20,5 @@ interface ClusterEntryPoint {
     fun helperBootstrap(): HelperBootstrap
     fun voiceController(): VoiceController
     fun hudController(): HudController
+    fun adbRestoreManager(): com.bydmate.app.data.autoservice.AdbRestoreManager
 }

@@ -215,4 +215,80 @@ class AdbOnDeviceClientTest {
 
         assertFalse("killHelper must not claim success when exec returns null", result)
     }
+
+    @Test
+    fun `steering accessibility fallback preserves other services and verifies steering pid`() = runTest {
+        val current =
+            "com.bydmate.app/.cluster.SteeringWheelKeyService:" +
+                "com.van.diplus/com.van.diplus.service.KDService:" +
+                "com.iflytek.inputmethod/com.iflytek.libaccessibility.external.FlyIMEAccessibilityService"
+        val fake = FakeProtocol(
+            execResponses = mapOf(
+                "settings get secure enabled_accessibility_services" to current,
+                "dumpsys accessibility | grep -q 'Service\\[label=BYDMate' && echo connected" to
+                    "connected\n",
+            )
+        )
+        val client = newClient(fake)
+        client.connect()
+
+        val result = client.rebindSteeringAccessibility()
+
+        assertTrue(result)
+        val writes = fake.execCalls.filter { it.startsWith("settings put secure enabled_accessibility_services") }
+        assertEquals(2, writes.size)
+        assertFalse(writes.first().contains("com.bydmate.app"))
+        assertTrue(writes.first().contains("com.van.diplus"))
+        assertTrue(writes.first().contains("com.iflytek.inputmethod"))
+        assertTrue(writes.last().contains("com.bydmate.app/com.bydmate.app.cluster.SteeringWheelKeyService"))
+        assertTrue(fake.execCalls.contains("settings put secure accessibility_enabled 1"))
+    }
+
+    @Test
+    fun `canonical accessibility component treats short and full class forms equally`() {
+        assertEquals(
+            "com.bydmate.app/com.bydmate.app.cluster.SteeringWheelKeyService",
+            AdbOnDeviceClientImpl.canonicalAccessibilityComponent(
+                "com.bydmate.app/.cluster.SteeringWheelKeyService"
+            )
+        )
+    }
+
+    @Test
+    fun `climate fan uses narrow autoservice write and confirms readback`() = runTest {
+        val write = "service call autoservice 6 i32 1000 i32 501219340 i32 3"
+        val read = "service call autoservice 5 i32 1000 i32 1077936156"
+        val fake = FakeProtocol(
+            execResponses = mapOf(
+                write to "Result: Parcel(00000001    '....')\n",
+                read to "Result: Parcel(00000000 00000003   '........')\n",
+            )
+        )
+        val client = newClient(fake)
+        client.connect()
+
+        assertTrue(client.setClimateFanLevel(3))
+        assertEquals(listOf(write, read), fake.execCalls)
+    }
+
+    @Test
+    fun `climate fan rejects false-success write status`() = runTest {
+        val fake = FakeProtocol(execResult = "Result: Parcel(00000000    '....')\n")
+        val client = newClient(fake)
+        client.connect()
+
+        assertFalse(client.setClimateFanLevel(2))
+        assertEquals(1, fake.execCalls.size)
+    }
+
+    @Test
+    fun `autoservice read parser extracts second parcel word`() {
+        assertEquals(
+            4,
+            AdbOnDeviceClientImpl.parseAutoserviceReadInt(
+                "Result: Parcel(00000000 00000004   '........')"
+            )
+        )
+        assertNull(AdbOnDeviceClientImpl.parseAutoserviceReadInt("bad output"))
+    }
 }

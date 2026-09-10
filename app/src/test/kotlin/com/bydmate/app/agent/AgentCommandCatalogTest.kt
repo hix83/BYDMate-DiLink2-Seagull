@@ -32,6 +32,7 @@ class AgentCommandCatalogTest {
 
     @Test fun `resolve applies value for ranged command`() {
         assertEquals("设置温度22", AgentCommandCatalog.resolve("ac_set_temp", 22))
+        assertEquals("设置温度33", AgentCommandCatalog.resolve("ac_set_temp", 33))
     }
 
     @Test fun `resolve rejects out-of-range value`() {

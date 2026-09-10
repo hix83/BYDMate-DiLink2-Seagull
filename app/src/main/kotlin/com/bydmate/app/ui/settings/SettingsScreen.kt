@@ -113,6 +113,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
 import com.bydmate.app.R
 import com.bydmate.app.data.remote.OpenRouterModel
+import com.bydmate.app.data.autoservice.AdbRestoreState
 import com.bydmate.app.data.repository.SettingsRepository
 import com.bydmate.app.ui.components.AppLaunchPickerDialog
 import com.bydmate.app.ui.components.bydSwitchColors
@@ -1306,6 +1307,18 @@ private fun LearnButtonDialog(
 @Composable
 private fun ServiceSection(state: SettingsUiState, viewModel: SettingsViewModel) {
     val context = LocalContext.current
+    val adbRestore = remember {
+        EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            ClusterEntryPoint::class.java,
+        ).adbRestoreManager()
+    }
+    var adbRestoreEnabled by remember { mutableStateOf(adbRestore.isEnabled()) }
+    val adbRestoreState by adbRestore.state.collectAsStateWithLifecycle()
+
+    LaunchedEffect(adbRestoreEnabled) {
+        if (adbRestoreEnabled) adbRestore.requestAttempt("settings")
+    }
 
     // SAF picker for restore — must be declared at composable top level
     val restoreLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1313,6 +1326,26 @@ private fun ServiceSection(state: SettingsUiState, viewModel: SettingsViewModel)
     }
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var showExportConfirm by remember { mutableStateOf(false) }
+
+    SectionHeader(text = stringResource(R.string.settings_adb_restore_title))
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = CardSurfaceElevated),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp)) {
+            SettingToggleRow(
+                title = stringResource(R.string.settings_adb_restore_title),
+                description = stringResource(R.string.settings_adb_restore_desc),
+                checked = adbRestoreEnabled,
+                onCheckedChange = { enabled ->
+                    adbRestoreEnabled = enabled
+                    adbRestore.setEnabled(enabled)
+                },
+            )
+            adbRestoreStatusText(adbRestoreState)?.let { SettingHint(text = it) }
+        }
+    }
 
     // Confirm dialog for destructive restore operation
     if (showRestoreConfirm) {
@@ -1498,6 +1531,25 @@ private fun ServiceSection(state: SettingsUiState, viewModel: SettingsViewModel)
             )
         }
     }
+}
+
+@Composable
+private fun adbRestoreStatusText(state: AdbRestoreState): String? = when (state) {
+    AdbRestoreState.Disabled -> null
+    AdbRestoreState.NotNeeded -> stringResource(R.string.settings_adb_restore_status_not_needed)
+    AdbRestoreState.NeedsActivation -> stringResource(R.string.settings_adb_restore_status_needs_activation)
+    AdbRestoreState.WaitingWifi -> stringResource(R.string.settings_adb_restore_status_waiting_wifi)
+    AdbRestoreState.NeedsDialog -> stringResource(R.string.settings_adb_restore_status_needs_dialog)
+    AdbRestoreState.Connecting -> stringResource(R.string.settings_adb_restore_status_connecting)
+    is AdbRestoreState.Restored -> stringResource(
+        R.string.settings_adb_restore_status_restored,
+        android.text.format.DateFormat.getTimeFormat(LocalContext.current)
+            .format(java.util.Date(state.atMs)),
+    )
+    is AdbRestoreState.Failed -> stringResource(
+        R.string.settings_adb_restore_status_failed,
+        state.reason,
+    )
 }
 
 @Composable
@@ -2655,4 +2707,3 @@ private fun ModelPickerDialog(
         }
     }
 }
-

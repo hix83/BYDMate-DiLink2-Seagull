@@ -8,6 +8,7 @@ sealed interface ParseResult {
         val command: String? get() = commands.singleOrNull()
     }
     data class RelativeTemp(val sign: Int) : ParseResult
+    data class RelativeFan(val sign: Int) : ParseResult
     data class Volume(val payload: String) : ParseResult
     data object Unrecognized : ParseResult
 }
@@ -29,6 +30,10 @@ object NluParser {
             return ParseResult.Unrecognized
         }
 
+        // "Обдув" is shared by cabin airflow, seat ventilation and windshield
+        // defrost. Resolve the explicit climate variants before generic slots.
+        resolveClimateAirflow(rawTokens, stems, lang)?.let { return it }
+
         val actions = matchSlots(stems, VoiceLexicon.actionWords(lang))
         val devices = matchSlots(stems, VoiceLexicon.deviceWords(lang))
         val qualifiers = detectQualifiers(stems, lang)
@@ -47,7 +52,7 @@ object NluParser {
 
         // Bare absolute value: a temperature/number with no verb means SET
         // (e.g. "температура 24", "24 градуса"). The catalog ValueSpec still
-        // range-gates 16..30, so an out-of-range number yields Unrecognized.
+        // range-gates 16..33, so an out-of-range number yields Unrecognized.
         val effectiveActions = if (actions.isEmpty() && DeviceSlot.AC_TEMP in devices && number != null)
             setOf(ActionSlot.SET) else actions
 
@@ -257,4 +262,48 @@ object NluParser {
             .sortedByDescending { it.key.split(" ").size }
             .firstOrNull { joined.contains(it.key) }?.value
     }
+
+    private fun resolveClimateAirflow(
+        rawTokens: List<String>,
+        stems: List<String>,
+        lang: VoiceLang,
+    ): ParseResult? {
+        val s = stems.toSet()
+        fun has(vararg words: String) = words.any { VoiceStemmer.stem(it) in s }
+
+        val seat = if (lang == VoiceLang.RU) has("сиденье", "сидения", "кресло") else has("seat")
+        if (seat) return null
+        val airflow = if (lang == VoiceLang.RU) has("обдув", "вентилятор", "печка")
+            else has("airflow", "fan", "blower")
+        if (!airflow) return null
+
+        val windshield = if (lang == VoiceLang.RU) has("лобовое", "стекло", "ветровое")
+            else has("windshield", "windscreen", "glass")
+        if (windshield) {
+            val off = if (lang == VoiceLang.RU) {
+                has("выключи", "выключить", "отключи", "отключить", "убери", "убрать")
+            } else {
+                has("off", "disable", "stop", "remove")
+            }
+            return ParseResult.Command(if (off) "关闭吹前挡" else "吹前挡")
+        }
+
+        val increase = if (lang == VoiceLang.RU) {
+            has("увеличь", "увеличить", "прибавь", "прибавить", "сильнее", "больше")
+        } else has("increase", "raise", "stronger", "more", "higher")
+        val decrease = if (lang == VoiceLang.RU) {
+            has("уменьши", "уменьшить", "убавь", "убавить", "слабее", "меньше")
+        } else has("decrease", "lower", "weaker", "less")
+        if (increase xor decrease) return ParseResult.RelativeFan(if (increase) 1 else -1)
+
+        val level = detectNumber(rawTokens, lang)
+        if (level != null) {
+            return if (level in FAN_MIN..FAN_MAX) ParseResult.Command("设置风量$level")
+            else ParseResult.Unrecognized
+        }
+        return null
+    }
+
+    private const val FAN_MIN = 1
+    private const val FAN_MAX = 7
 }

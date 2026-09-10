@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioManager
 import android.util.Log
 import com.bydmate.app.agent.LlmConnectionResolver
+import com.bydmate.app.data.autoservice.AdbOnDeviceClient
 import com.bydmate.app.data.remote.DiParsData
 import com.bydmate.app.data.repository.SettingsRepository
 import com.bydmate.app.service.TrackingService
@@ -128,10 +129,11 @@ object VoiceModule {
     }
 
     @Provides @Singleton
-    fun provideAudioCapture(@ApplicationContext ctx: Context) =
+    fun provideAudioCapture(@ApplicationContext ctx: Context, adb: AdbOnDeviceClient) =
         AudioCapture(
             ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager,
             ctx.getSharedPreferences("voice", Context.MODE_PRIVATE),
+            adb,
         )
 
     @Provides @Singleton

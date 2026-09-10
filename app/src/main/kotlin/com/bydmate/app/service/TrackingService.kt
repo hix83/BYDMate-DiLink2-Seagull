@@ -1,7 +1,6 @@
 package com.bydmate.app.service
 
 import android.Manifest
-import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -16,11 +15,13 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
-import android.view.accessibility.AccessibilityManager
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.bydmate.app.MainActivity
@@ -61,6 +62,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import java.io.File
+import dagger.Lazy
 import javax.inject.Inject
 import javax.inject.Named
 
@@ -86,6 +88,12 @@ class TrackingService : Service(), LocationListener {
     @Inject lateinit var autoserviceClient: com.bydmate.app.data.autoservice.AutoserviceClient
     @Inject lateinit var cameraStateMonitor: com.bydmate.app.data.camera.CameraStateMonitor
     @Inject lateinit var adbOnDeviceClient: com.bydmate.app.data.autoservice.AdbOnDeviceClient
+    // Keep the ADB restore graph out of Hilt's pre-onCreate service injection path.
+    // On the DiLink 2 Android 9 head unit, cold-loading its crypto/ADB classes can take
+    // longer than the 5-second foreground-service deadline. The Lazy wrapper lets
+    // onCreate() call startForeground() first and only constructs the graph when a
+    // restore attempt actually runs on serviceScope.
+    @Inject lateinit var adbRestoreManager: Lazy<com.bydmate.app.data.autoservice.AdbRestoreManager>
     @Inject lateinit var iternioTelemetryClient: IternioTelemetryClient
     @Inject lateinit var lastSessionRepository: com.bydmate.app.data.repository.LastSessionRepository
     @Inject lateinit var sharedAdaptiveLoop: com.bydmate.app.data.loop.SharedAdaptiveLoop
@@ -107,6 +115,7 @@ class TrackingService : Service(), LocationListener {
     private var wakeLock: PowerManager.WakeLock? = null
     private var wakeLockRenewer: WakeLockRenewer? = null
     private var locationManager: LocationManager? = null
+    private var adbNetworkCallback: ConnectivityManager.NetworkCallback? = null
     private var firstDataReceived = false
 
     // Widget session (ignition-on → ignition-off) — decoupled from TripTracker GPS state.
@@ -179,6 +188,11 @@ class TrackingService : Service(), LocationListener {
     // lifetime so the real sleep-charge materializes; once-only so a gun-less
     // live charge (Song reports gun=null) can't split one session into many.
     @Volatile private var socRearmUsed = false
+    // Real cross-process liveness reported by SteeringWheelKeyService.onServiceConnected().
+    // The framework's enabled-service list only mirrors the settings toggle and can remain true
+    // while DiLink has not actually bound the :steering process.
+    @Volatile private var steeringA11yConnected = false
+    private var lastForcedStarWakeRebindMs = 0L
 
     private val iternioTelemetryLock = Any()
     @Volatile private var lastIternioTelemetryMs: Long = 0L
@@ -197,7 +211,14 @@ class TrackingService : Service(), LocationListener {
         GrantSelfHeal(
             name = "star a11y",
             isGranted = ::starServiceRunning,
-            reassert = { helperBootstrap.ensureRunning() && helperClient.enableAccessibilityService() },
+            reassert = {
+                // The helper binder may spend ~30 s retrying when ServiceManager.addService is
+                // unavailable on this DiLink 2 build. The already-authorized on-device ADB path
+                // performs the same narrow remove/re-add in ~2 s, so prefer it on every wake.
+                val adbRebound = adbOnDeviceClient.rebindSteeringAccessibility()
+                adbRebound || (helperBootstrap.ensureRunning() &&
+                    helperClient.enableAccessibilityService())
+            },
         )
     }
 
@@ -230,6 +251,8 @@ class TrackingService : Service(), LocationListener {
     companion object {
         private const val TAG = "TrackingService"
         internal const val ACTION_VOICE_PTT = "com.bydmate.app.action.VOICE_PTT"
+        internal const val ACTION_STEERING_A11Y_STATE = "com.bydmate.app.action.STEERING_A11Y_STATE"
+        internal const val EXTRA_STEERING_A11Y_CONNECTED = "connected"
         private const val NOTIFICATION_ID = 1
         private const val CHANNEL_ID = "bydmate_tracking"
         // Throttle autoservice gun-state read so we don't hit Binder/ADB on every
@@ -264,6 +287,7 @@ class TrackingService : Service(), LocationListener {
         // dead socket) — field incident 2026-07-05 saw 26 respawn bails in 2 minutes hammering a
         // stale ADB socket.
         private const val HELPER_RESPAWN_COOLDOWN_MS = 60_000L
+        private const val STAR_WAKE_REBIND_DEBOUNCE_MS = 15_000L
 
         /** Pure cooldown gate for the watchdog respawn below — internal (not private) so
          *  WatchdogGateTest can exercise it directly without touching Android. */
@@ -412,6 +436,18 @@ class TrackingService : Service(), LocationListener {
             }
             context.startForegroundService(intent)
         }
+
+        /** Reports the actual AccessibilityService bind from the dedicated :steering process. */
+        fun reportSteeringA11yState(context: Context, connected: Boolean) {
+            val intent = Intent(context, TrackingService::class.java).apply {
+                action = ACTION_STEERING_A11Y_STATE
+                putExtra(EXTRA_STEERING_A11Y_CONNECTED, connected)
+            }
+            context.startForegroundService(intent)
+        }
+
+        /** Main-process liveness used by diagnostics. */
+        fun isSteeringA11yConnected(): Boolean = instance?.steeringA11yConnected == true
 
         fun stop(context: Context) {
             context.stopService(Intent(context, TrackingService::class.java))
@@ -600,6 +636,7 @@ class TrackingService : Service(), LocationListener {
         // still cannot see the helper daemon's lines.
         serviceScope.launch { readLogsGrant.ensure("startup") }
         registerScreenWakeReceiver()
+        registerAdbRestoreNetworkCallback()
 
         // Start the network monitor BEFORE polling so the first evaluate() tick
         // already has access to the latest VALIDATED edge state.
@@ -676,9 +713,15 @@ class TrackingService : Service(), LocationListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         maybeAttachWidget()
-        if (intent?.action == ACTION_VOICE_PTT) {
-            Log.i(TAG, "Voice PTT received in main process; snapshotReady=${lastData.value != null}")
-            voiceController.onSteeringPttPressed()
+        when (intent?.action) {
+            ACTION_VOICE_PTT -> {
+                Log.i(TAG, "Voice PTT received in main process; snapshotReady=${lastData.value != null}")
+                voiceController.onSteeringPttPressed()
+            }
+            ACTION_STEERING_A11Y_STATE -> {
+                steeringA11yConnected = intent.getBooleanExtra(EXTRA_STEERING_A11Y_CONNECTED, false)
+                Log.i(TAG, "Steering a11y real bind state: $steeringA11yConnected")
+            }
         }
         return START_STICKY
     }
@@ -953,6 +996,13 @@ class TrackingService : Service(), LocationListener {
         } catch (e: Exception) {
             Log.w(TAG, "screen-wake receiver unregister failed: ${e.message}")
         }
+        adbNetworkCallback?.let { callback ->
+            runCatching {
+                (getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager)
+                    .unregisterNetworkCallback(callback)
+            }
+        }
+        adbNetworkCallback = null
         // AutomationEngine is @Singleton — its scope must outlive the service
         // (WorkManager restarts the service into the same process, reusing the
         // singleton). Cancelling here left confirm-action callbacks dead until
@@ -1109,8 +1159,13 @@ class TrackingService : Service(), LocationListener {
                             lastHelperRespawnAtMs = now
                             Log.w(TAG, "Helper daemon unhealthy, attempting respawn")
                             serviceScope.launch {
-                                runCatching { helperBootstrap.ensureRunning() }
+                                val recovered = runCatching { helperBootstrap.ensureRunning() }
+                                    .onSuccess { recovered ->
+                                        if (recovered) ensureStarServiceRunning("helper-recovered")
+                                    }
                                     .onFailure { Log.w(TAG, "Helper respawn failed: ${it.message}") }
+                                    .getOrDefault(false)
+                                if (!recovered) adbRestoreManager.get().attemptIfNeeded("watchdog")
                             }
                         }
                     }
@@ -1281,10 +1336,16 @@ class TrackingService : Service(), LocationListener {
         serviceScope.launch {
             try {
                 if (adbOnDeviceClient.connect().isSuccess) {
+                    // Crash recovery: a killed voice session may not have reached AudioCapture's
+                    // finally block after temporarily gating Alice's microphone.
+                    adbOnDeviceClient.setYandexMicrophoneBlocked(false)
                     val granted = adbOnDeviceClient.grantUsageStatsAppop("com.bydmate.app")
                     Log.i(TAG, "GET_USAGE_STATS appop grant: $granted")
+                    val secureSettings = adbOnDeviceClient.grantWriteSecureSettings("com.bydmate.app")
+                    Log.i(TAG, "WRITE_SECURE_SETTINGS grant: $secureSettings")
                 } else {
                     Log.w(TAG, "ADB connect refused — camera detection may be inactive until appop is granted manually")
+                    adbRestoreManager.get().attemptIfNeeded("service_start")
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "ADB appop grant failed: ${e.message}")
@@ -1367,9 +1428,53 @@ class TrackingService : Service(), LocationListener {
     // so a healthy service is never disturbed.
     private val screenWakeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            serviceScope.launch { ensureStarServiceRunning("wake:${intent?.action}") }
+            val now = System.currentTimeMillis()
+            // DiLink normally emits SCREEN_ON and USER_PRESENT back-to-back. Force exactly one
+            // remove/re-add cycle for that wake; the second event performs only the normal check.
+            val forceRebind = now - lastForcedStarWakeRebindMs >= STAR_WAKE_REBIND_DEBOUNCE_MS
+            if (forceRebind) lastForcedStarWakeRebindMs = now
+            serviceScope.launch {
+                ensureStarServiceRunning("wake:${intent?.action}", forceRebind = forceRebind)
+            }
             serviceScope.launch { notificationListenerGrant.ensure("wake:${intent?.action}") }
+            val adbTrigger = if (intent?.action == Intent.ACTION_USER_PRESENT) {
+                "user_present"
+            } else {
+                "screen_on"
+            }
+            serviceScope.launch {
+                runCatching { adbRestoreManager.get().attemptIfNeeded(adbTrigger) }
+                    .onFailure { Log.w(TAG, "ADB restore on $adbTrigger failed: ${it.message}") }
+            }
         }
+    }
+
+    private fun registerAdbRestoreNetworkCallback() {
+        val manager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            private var validated: Network? = null
+
+            override fun onAvailable(network: Network) {
+                serviceScope.launch { adbRestoreManager.get().attemptIfNeeded("wifi") }
+            }
+
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+                    if (validated == network) validated = null
+                    return
+                }
+                if (validated == network) return
+                validated = network
+                serviceScope.launch { adbRestoreManager.get().attemptIfNeeded("wifi_validated") }
+            }
+
+            override fun onLost(network: Network) {
+                if (validated == network) validated = null
+            }
+        }
+        runCatching { manager.registerDefaultNetworkCallback(callback) }
+            .onSuccess { adbNetworkCallback = callback }
+            .onFailure { Log.w(TAG, "ADB restore network callback failed: ${it.message}") }
     }
 
     private fun registerScreenWakeReceiver() {
@@ -1390,10 +1495,10 @@ class TrackingService : Service(), LocationListener {
      * race and the framework parks the service without retrying. A single early re-assert (the old
      * behaviour) often fired before the race settled. OpenBYD survives the same environment by re-
      * checking until the service is actually RUNNING and re-asserting on every wake, not once. We copy
-     * that: verify-and-retry, gated on the TRUE liveness signal (SteeringWheelKeyService.isConnected)
-     * plus the framework's running list, so a healthy service is never disturbed.
+     * that: verify-and-retry, gated on the TRUE bind signal delivered from the dedicated :steering
+     * process, so a merely enabled-but-unbound service is repaired automatically.
      */
-    private suspend fun ensureStarServiceRunning(reason: String) {
+    private suspend fun ensureStarServiceRunning(reason: String, forceRebind: Boolean = false) {
         val prefs = getSharedPreferences(ClusterProjectionManager.PREFS_NAME, Context.MODE_PRIVATE)
         val mirrorEnabled = prefs.getBoolean(ClusterProjectionManager.KEY_MIRROR_ENABLED, false)
         // Voice PTT depends on the same a11y service (SteeringWheelKeyService reads "voice" prefs
@@ -1403,25 +1508,11 @@ class TrackingService : Service(), LocationListener {
         // HUD guidance also reads Navigator via this a11y service; gate on CONFIRMED
         // support, not the raw pref, so unsupported cars stay untouched (Codex fix 1).
         if (!mirrorEnabled && !voiceEnabled && !hudController.requiresA11y()) return
-        starGrant.ensure(reason)
+        starGrant.ensure(reason, forceFirstReassert = forceRebind)
     }
 
-    /**
-     * RUNNING when our service reports it is connected (true liveness) OR the framework lists it in
-     * the currently-bound a11y set. Mirrors OpenBYD getStatus(): either signal counts as alive.
-     */
-    private fun starServiceRunning(): Boolean =
-        com.bydmate.app.cluster.SteeringWheelKeyService.isConnected || starServiceBound()
-
-    /** True when our steering-wheel service is in the framework's currently-bound a11y set. */
-    private fun starServiceBound(): Boolean {
-        val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return false
-        val ours = ComponentName.unflattenFromString(
-            com.bydmate.app.helper.HelperBinderProtocol.ACCESSIBILITY_SERVICE_COMPONENT
-        ) ?: return false
-        return am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-            .any { ComponentName.unflattenFromString(it.id ?: "") == ours }
-    }
+    /** RUNNING only after onServiceConnected in :steering has reported across processes. */
+    private fun starServiceRunning(): Boolean = steeringA11yConnected
 
     private fun createNotificationChannel() {
         val channel = NotificationChannel(

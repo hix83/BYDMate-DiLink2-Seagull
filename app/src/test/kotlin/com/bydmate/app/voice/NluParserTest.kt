@@ -37,6 +37,7 @@ class NluParserTest {
 
     @Test fun temperature_with_digit_and_word() {
         assertEquals("设置温度22", cmd("поставь температуру 22"))
+        assertEquals("设置温度33", cmd("поставь температуру 33"))
         assertEquals("设置温度24", cmd("сделай двадцать четыре градуса"))
     }
 
@@ -70,6 +71,26 @@ class NluParserTest {
 
     @Test fun airflow_windshield_with_verb() {
         assertEquals("吹前挡", cmd("включи обдув лобового"))
+    }
+
+    @Test fun airflow_windshield_without_verb_and_off() {
+        assertEquals("吹前挡", cmd("обдув на стекло"))
+        assertEquals("吹前挡", cmd("обдув на лобовое стекло"))
+        assertEquals("关闭吹前挡", cmd("убери обдув со стекла"))
+    }
+
+    @Test fun cabin_fan_absolute_levels() {
+        assertEquals("设置风量1", cmd("обдув 1"))
+        assertEquals("设置风量4", cmd("поставь вентилятор на четыре"))
+        assertEquals("设置风量7", cmd("обдув семь"))
+        assertEquals(ParseResult.Unrecognized, NluParser.parse("обдув 8", VoiceLang.RU))
+    }
+
+    @Test fun cabin_fan_relative() {
+        assertEquals(ParseResult.RelativeFan(1), NluParser.parse("увеличить обдув", VoiceLang.RU))
+        assertEquals(ParseResult.RelativeFan(1), NluParser.parse("сделай вентилятор сильнее", VoiceLang.RU))
+        assertEquals(ParseResult.RelativeFan(-1), NluParser.parse("уменьшить обдув", VoiceLang.RU))
+        assertEquals(ParseResult.RelativeFan(-1), NluParser.parse("убавь печку", VoiceLang.RU))
     }
 
     @Test fun airflow_seat_wins_over_climate() {

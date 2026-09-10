@@ -20,6 +20,7 @@ class VoiceCommandSpecTest {
 
     @Test fun resolves_dynamic_temperature_within_range() {
         assertEquals("设置温度23", VoiceCatalog.resolve(ActionSlot.SET, DeviceSlot.AC_TEMP, 23))
+        assertEquals("设置温度33", VoiceCatalog.resolve(ActionSlot.SET, DeviceSlot.AC_TEMP, 33))
     }
 
     @Test fun rejects_temperature_out_of_range() {

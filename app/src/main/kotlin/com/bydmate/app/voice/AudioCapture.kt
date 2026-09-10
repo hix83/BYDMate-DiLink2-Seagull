@@ -6,9 +6,14 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Log
+import com.bydmate.app.data.autoservice.AdbOnDeviceClient
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 internal enum class AudioReadDecision { EMIT, RETRY, STOP }
@@ -19,7 +24,17 @@ internal fun audioReadDecision(result: Int): AudioReadDecision = when {
     else -> AudioReadDecision.STOP
 }
 
-class AudioCapture(private val audioManager: AudioManager, private val prefs: SharedPreferences) {
+internal fun audioFocusGranted(result: Int): Boolean =
+    result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+
+internal fun shouldStopCaptureForFocusChange(change: Int): Boolean =
+    change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
+
+class AudioCapture(
+    private val audioManager: AudioManager,
+    private val prefs: SharedPreferences,
+    private val adb: AdbOnDeviceClient? = null,
+) {
 
     companion object {
         private const val SAMPLE_RATE = 16000
@@ -36,6 +51,7 @@ class AudioCapture(private val audioManager: AudioManager, private val prefs: Sh
         )
         internal const val DUCK_VOLUME_INDEX = 1
         private const val TAG = "AudioCapture"
+        private const val YANDEX_MIC_RELEASE_GRACE_MS = 350L
         // Pre-duck media volume survives process death here; restoreStuckDuck() reads it
         // at service start (stuck-quiet media after a crash / APK update mid session).
         internal const val KEY_PRE_DUCK_VOLUME = "pre_duck_volume"
@@ -69,6 +85,17 @@ class AudioCapture(private val audioManager: AudioManager, private val prefs: Sh
     // hadn't started talking loudly yet, cutting them off mid-phrase. [maxMs] is only a safety
     // backstop so the mic can't stay open forever (e.g. continuous noise with no VAD endpoint).
     fun captureSession(maxMs: Long = 8000): Flow<ShortArray> = callbackFlow {
+        var yandexMicBlocked = false
+        try {
+        // Android 9 cannot arbitrate two capture clients: Alice remains the active MIC owner even
+        // after abandoning playback focus, so BYDMate's AudioRecord never becomes active. Gate
+        // RECORD_AUDIO only for the fixed Yandex package allowlist during this capture window.
+        // Navigation and music processes remain alive; finally restores the app-op on every exit.
+        yandexMicBlocked = runCatching {
+            adb?.setYandexMicrophoneBlocked(true) == true
+        }.getOrDefault(false)
+        if (yandexMicBlocked) delay(YANDEX_MIC_RELEASE_GRACE_MS)
+
         val minBuf = AudioRecord.getMinBufferSize(
             SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
         ).coerceAtLeast(SAMPLE_RATE) // ~0.5s
@@ -81,23 +108,64 @@ class AudioCapture(private val audioManager: AudioManager, private val prefs: Sh
         // delay the volume drop by a perceptible beat.
         val duckedFrom = duckMusic()
 
-        // If the mic cannot open, restore the volume we just ducked before bailing — otherwise
-        // media would stay stuck at the duck level with no listen window to justify it.
+        // Yandex Music/Navigator keeps Alice's recognizer attached to the microphone on this
+        // DiLink 2 build. MAY_DUCK only affects playback and lets both recognizers race for the
+        // single Android 9 capture input. A transient EXCLUSIVE focus is the platform contract for
+        // speech recognition: Alice is asked to release its capture while BYDMate is listening and
+        // receives focus back when the session ends.
+        val focusLost = AtomicBoolean(false)
+        val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
+            if (shouldStopCaptureForFocusChange(change)) {
+                focusLost.set(true)
+                Log.w(TAG, "exclusive voice focus lost: $change; closing capture")
+                close(IllegalStateException("audio focus lost: $change"))
+            }
+        }
+        val focusResult = runCatching {
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(
+                focusListener,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE,
+            )
+        }.getOrDefault(AudioManager.AUDIOFOCUS_REQUEST_FAILED)
+        if (!audioFocusGranted(focusResult)) {
+            Log.w(TAG, "exclusive voice focus denied: $focusResult")
+            restoreMusic(duckedFrom)
+            close(IllegalStateException("voice audio focus unavailable"))
+            return@callbackFlow
+        }
+
+        // If the mic cannot open, release exclusive focus and restore the volume before bailing —
+        // otherwise Yandex/media would remain paused or ducked with no listen window to justify it.
         val record = openRecord(minBuf) ?: run {
+            @Suppress("DEPRECATION")
+            runCatching { audioManager.abandonAudioFocus(focusListener) }
             restoreMusic(duckedFrom)
             close(IllegalStateException("mic unavailable"))
             return@callbackFlow
         }
 
-        // Fix C — release the already-initialized AudioRecord and abandon focus if
-        // requestAudioFocus or startRecording throw (otherwise both resources leak
-        // because awaitClose has not been registered yet at this point).
+        // Focus can be revoked asynchronously between the grant and AudioRecord creation.
+        if (focusLost.get()) {
+            runCatching { record.release() }
+            @Suppress("DEPRECATION")
+            runCatching { audioManager.abandonAudioFocus(focusListener) }
+            restoreMusic(duckedFrom)
+            return@callbackFlow
+        }
+
+        // Release the already-initialized AudioRecord and abandon focus if startRecording throws
+        // (otherwise both resources leak because awaitClose is not registered yet at this point).
         try {
-            audioManager.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
             record.startRecording()
+            if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                throw IllegalStateException("AudioRecord did not enter RECORDSTATE_RECORDING")
+            }
         } catch (t: Throwable) {
             runCatching { record.release() }
-            runCatching { audioManager.abandonAudioFocus(null) }
+            @Suppress("DEPRECATION")
+            runCatching { audioManager.abandonAudioFocus(focusListener) }
             restoreMusic(duckedFrom)
             close(t)
             return@callbackFlow
@@ -133,9 +201,20 @@ class AudioCapture(private val audioManager: AudioManager, private val prefs: Sh
             runCatching { record.release() }
             // Each cleanup step is independent: a throw in one must not skip the
             // volume restore below (otherwise media stays ducked at 15%).
-            runCatching { audioManager.abandonAudioFocus(null) }
+            @Suppress("DEPRECATION")
+            runCatching { audioManager.abandonAudioFocus(focusListener) }
             restoreMusic(duckedFrom)
             worker.interrupt()
+        }
+        } finally {
+            if (yandexMicBlocked) {
+                withContext(NonCancellable) {
+                    val restored = runCatching {
+                        adb?.setYandexMicrophoneBlocked(false) == true
+                    }.getOrDefault(false)
+                    Log.i(TAG, "Yandex microphone access restored=$restored")
+                }
+            }
         }
     }
 

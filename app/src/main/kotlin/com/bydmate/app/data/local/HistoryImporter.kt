@@ -473,6 +473,14 @@ class HistoryImporter @Inject constructor(
             return ImportResult(trips = 0, details = "Di+: sync already running")
         }
         return try {
+            // This is intentionally recurring, not a one-shot migration. Older builds
+            // could insert native_polling after the matching Di+ row had already been
+            // imported, so duplicates may appear at any later drive.
+            val cleaned = tripDao.deleteNativeDuplicatesOfDiPlus(
+                nativeSource = TripSource.NATIVE_POLLING,
+                diPlusSource = TripSource.DIPLUS,
+                windowMs = DEDUP_WINDOW_MS,
+            )
             val records = diPlusDbReader.readTripInfo()
             var imported = 0
             var duplicates = 0
@@ -487,6 +495,27 @@ class HistoryImporter @Inject constructor(
                     record.timeStart + DEDUP_WINDOW_MS,
                 )
                 if (existing != null) {
+                    // Prefer the authoritative Di+ values when native polling landed
+                    // first. This also turns the row into a future stable Di+ match.
+                    if (existing.source == TripSource.NATIVE_POLLING) {
+                        val kwh = record.kwhConsumed.takeIf { it > 0.0 }
+                        val distance = record.mileage.takeIf { it >= 0.0 }
+                        tripRepository.updateTrip(
+                            existing.copy(
+                                startTs = record.timeStart,
+                                endTs = record.timeEnd,
+                                distanceKm = distance,
+                                kwhConsumed = kwh,
+                                kwhPer100km = if (kwh != null && distance != null && distance > 0.0) {
+                                    kwh / distance * 100.0
+                                } else null,
+                                socStart = record.socStart.toInt(),
+                                socEnd = record.socEnd.toInt(),
+                                avgSpeedKmh = record.avgSpeed.takeIf { it > 0.0 },
+                                source = TripSource.DIPLUS,
+                            )
+                        )
+                    }
                     duplicates++
                     continue
                 }
@@ -511,7 +540,8 @@ class HistoryImporter @Inject constructor(
             }
             ImportResult(
                 trips = imported,
-                details = "Di+: +$imported trips, $duplicates duplicates, $shortTrips short",
+                details = "Di+: +$imported trips, $duplicates duplicates, " +
+                    "$cleaned native duplicates removed, $shortTrips short",
             )
         } catch (e: Exception) {
             Log.e(TAG, "syncFromDiPlus failed", e)

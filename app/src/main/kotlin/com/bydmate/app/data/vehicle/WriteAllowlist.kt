@@ -107,9 +107,12 @@ class WriteAllowlist(private val map: Map<String, WriteEntry>) {
             // Both values physically validated in-car 2026-07-07.
             WriteEntry("ac_auto_on",     1000, 501219352, null, 0, 0,   "climate",  true, "live-leopard3-2026-07-07"),
             WriteEntry("ac_auto_off",    1000, 501219352, null, 1, 1,   "climate",  true, "live-leopard3-2026-07-07"),
-            WriteEntry("ac_temp_main",   1000, 501219368, null, 16, 30, "climate",  true, "live-leopard3-2026-05-28"),
+            WriteEntry("ac_temp_main",   1000, 501219368, null, 16, 33, "climate",  true, "seagull-dilink2-2026-09-10"),
             WriteEntry("ac_cycle_inner", 1000, 501219355, null, 1, 1,   "climate",  true, "live-leopard3-2026-05-28"),
             WriteEntry("ac_cycle_outer", 1000, 501219355, null, 0, 0,   "climate",  true, "live-leopard3-2026-06-28"),
+            // Seagull DiLink 2 blower: all seven stages physically written and
+            // confirmed through read FID 1077936156 on 2026-08-27.
+            WriteEntry("ac_wind_level", 1000, 501219340, 1077936156, 1, 7, "climate", true, "live-seagull-dilink2-2026-08-27"),
 
             // windows competitor short-form (front only)
             WriteEntry("window_driver_open",     1001, 1125122104, null, 1, 1, "windows", true, "live-leopard3-2026-05-28"),

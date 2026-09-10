@@ -1077,4 +1077,13 @@
     <string name="settings_hud_hint">Requires a trim with the head-up display. Data comes from the Yandex Navigator window</string>
     <string name="settings_secret_show">Show key</string>
     <string name="settings_secret_hide">Hide key</string>
+    <string name="settings_adb_restore_title">Restore ADB after reboot</string>
+    <string name="settings_adb_restore_desc">For firmware that disables ADB after every reboot. Wi‑Fi must be connected. Confirm the system dialog and always allow this network the first time.</string>
+    <string name="settings_adb_restore_status_not_needed">Not needed: ADB already works</string>
+    <string name="settings_adb_restore_status_needs_activation">Activation needed: connect ADB once and restart the app</string>
+    <string name="settings_adb_restore_status_waiting_wifi">Waiting for Wi‑Fi</string>
+    <string name="settings_adb_restore_status_needs_dialog">Confirm the wireless debugging dialog on screen</string>
+    <string name="settings_adb_restore_status_connecting">Restoring…</string>
+    <string name="settings_adb_restore_status_restored">Restored at %1$s</string>
+    <string name="settings_adb_restore_status_failed">Error: %1$s</string>
 </resources>

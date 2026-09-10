@@ -64,7 +64,7 @@ object CommandTranslator {
         // ── Climate ── LIVE_VALIDATED (ac_on/ac_off/ac_cycle_*/ac_auto_*) ──────
         // ac_power fid 501219364: 0=off, 1=on (LIVE 2026-07-03, both directions
         // physically confirmed in-car). 设置温度<N> resolves dynamically over
-        // 16..30 in resolve(), so there are no per-temperature entries here (the
+        // 16..33 in resolve(), so there are no per-temperature entries here (the
         // old 18/20/22/25-only table missed every other value).
         "自动空调"    to Resolved("ac_on",         1),  // LIVE 2026-07-03: ac_power fid, 1=on
         "关闭空调"    to Resolved("ac_off",        0),  // LIVE 2026-07-03: ac_power fid, 0=off
@@ -179,10 +179,16 @@ object CommandTranslator {
         composite[stripped]?.let { return it }
         table[stripped]?.let { return listOf(it) }
         // Dynamic temperature: 设置温度<N> → ac_temp_main, clamped to the validated
-        // 16..30 window (allowlist range-gates it anyway; clamping is friendlier).
+        // 16..33 window (allowlist range-gates it anyway; clamping is friendlier).
         TEMP_REGEX.matchEntire(stripped)?.let { m ->
             val celsius = m.groupValues[1].toInt().coerceIn(TEMP_MIN, TEMP_MAX)
             return listOf(Resolved("ac_temp_main", celsius))
+        }
+        // Dynamic DiLink 2 blower stage: 设置风量<N> -> ac_wind_level.
+        FAN_REGEX.matchEntire(stripped)?.let { m ->
+            val level = m.groupValues[1].toIntOrNull() ?: return emptyList()
+            if (level !in FAN_MIN..FAN_MAX) return emptyList()
+            return listOf(Resolved("ac_wind_level", level))
         }
         // Dynamic fridge setpoints: 冰箱制冷<N>度 / 冰箱制热<N>度 for ANY N — the agent
         // catalog exposes the full validated ranges (-6..6 cool / 35..50 heat) while the
@@ -202,7 +208,10 @@ object CommandTranslator {
     // Dynamic temperature command: 设置温度<N> (e.g. 设置温度24). Range-clamped in resolve().
     private val TEMP_REGEX = Regex("""设置温度(\d+)""")
     private const val TEMP_MIN = 16
-    private const val TEMP_MAX = 30
+    private const val TEMP_MAX = 33
+    private val FAN_REGEX = Regex("""设置风量(\d+)""")
+    private const val FAN_MIN = 1
+    private const val FAN_MAX = 7
 
     // Dynamic fridge commands: 冰箱制冷<N>度 (cool, C in -6..6) / 冰箱制热<N>度 (heat, 35..50).
     private val FRIDGE_COOL_REGEX = Regex("""冰箱制冷(-?\d+)度""")
@@ -217,7 +226,7 @@ object CommandTranslator {
     private const val VENT_PCT = 10
 
     /** Action names produced only by dynamic resolution (absent from [table]). */
-    private val DYNAMIC_ACTIONS = setOf("ac_temp_main")
+    private val DYNAMIC_ACTIONS = setOf("ac_temp_main", "ac_wind_level")
 
     /** Set of all action_names referenced by this translator. Used by invariant test. */
     fun allActions(): Set<String> =

@@ -1534,11 +1534,10 @@ class SettingsViewModel @Inject constructor(
 
             appendLine("--- steering key ---")
             try {
-                // Same two liveness signals TrackingService.starServiceRunning() checks:
-                // our service's own connected flag and the framework's bound-a11y set.
-                // The raw Secure setting is listed too - on some firmwares it desyncs
-                // from the actually-bound set across ignition cycles (DiLink 4 reports).
-                appendLine("a11y_connected: ${com.bydmate.app.cluster.SteeringWheelKeyService.isConnected}")
+                // Real bind is reported from the dedicated :steering process to TrackingService.
+                // getEnabledAccessibilityServiceList below is only the configured/enabled list;
+                // it can stay true while DiLink has failed to bind the service.
+                appendLine("a11y_connected: ${com.bydmate.app.service.TrackingService.isSteeringA11yConnected()}")
                 val am = appContext.getSystemService(Context.ACCESSIBILITY_SERVICE)
                     as android.view.accessibility.AccessibilityManager
                 val ours = android.content.ComponentName.unflattenFromString(
@@ -1546,7 +1545,7 @@ class SettingsViewModel @Inject constructor(
                 val bound = ours != null && am.getEnabledAccessibilityServiceList(
                     android.accessibilityservice.AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
                     .any { android.content.ComponentName.unflattenFromString(it.id ?: "") == ours }
-                appendLine("a11y_framework_bound: $bound")
+                appendLine("a11y_enabled_listed: $bound")
                 val secure = android.provider.Settings.Secure.getString(
                     appContext.contentResolver, "enabled_accessibility_services")
                 appendLine("a11y_secure_setting: ${secure ?: "(null)"}")

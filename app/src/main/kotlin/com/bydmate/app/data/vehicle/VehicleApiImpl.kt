@@ -69,6 +69,20 @@ class VehicleApiImpl @Inject constructor(
         platform: VehiclePlatform,
     ): Result<Unit> {
         if (diPlusControl != null && platform == VehiclePlatform.DILINK2) {
+            // Di+ 1.3.8 returns success=true for unknown blower phrases but performs
+            // no action. Route this one proven command through on-device ADB directly
+            // to autoservice and require live FanLevel readback before reporting OK.
+            CommandTranslator.resolve(commandString).singleOrNull()
+                ?.takeIf { it.actionName == "ac_wind_level" }
+                ?.let { fan ->
+                    val changed = adbOnDevice?.setClimateFanLevel(fan.value) ?: false
+                    return if (changed) Result.success(Unit) else Result.failure(
+                        VehicleWriteError.HelperUnreachable(
+                            commandString,
+                            "DiLink 2 native blower write/readback failed",
+                        )
+                    )
+                }
             if (!diPlusControl.sendCommand(commandString)) {
                 return Result.failure(
                     VehicleWriteError.HelperUnreachable(commandString, "Di+ sendCmd failed")

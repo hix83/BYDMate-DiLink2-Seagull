@@ -475,6 +475,7 @@ class VoiceController @Inject constructor(
         when (val r = NluParser.parse(text, lang)) {
             is ParseResult.Command -> Resolution.Cmd(r.commands)
             is ParseResult.RelativeTemp -> Resolution.RelTemp(r.sign)
+            is ParseResult.RelativeFan -> Resolution.RelFan(r.sign)
             is ParseResult.Volume -> Resolution.Vol(r.payload)
             ParseResult.Unrecognized -> automationResolver.match(text)?.let { Resolution.Auto(it) }
         }
@@ -485,6 +486,7 @@ class VoiceController @Inject constructor(
         when (res) {
             is Resolution.Cmd -> execute(res.commands, transcript, decodeMs)
             is Resolution.RelTemp -> dispatchRelativeTemp(res.sign, transcript, decodeMs)
+            is Resolution.RelFan -> dispatchRelativeFan(res.sign, transcript, decodeMs)
             is Resolution.Vol -> dispatchVolume(res.payload, transcript, decodeMs)
             is Resolution.Auto -> fireAutomation(res.ruleId, transcript, decodeMs)
         }
@@ -575,7 +577,7 @@ class VoiceController @Inject constructor(
         }
     }
 
-    /** Relative temperature: read the live AC setpoint, step +-1, clamp 16..30,
+    /** Relative temperature: read the live AC setpoint, step +-1, clamp 16..33,
      *  then dispatch as an absolute set. Fail-soft if the setpoint is unknown. */
     private suspend fun dispatchRelativeTemp(sign: Int, transcript: String, decodeMs: Long? = null) {
         val acTemp = gate.vehicleSnapshot()?.acTemp
@@ -588,8 +590,25 @@ class VoiceController @Inject constructor(
             announce("Голос", "Услышал: «$transcript». Отказ: $reason", "Не получилось")
             return
         }
-        val target = (acTemp + sign).coerceIn(16, 30)
+        val target = (acTemp + sign).coerceIn(16, 33)
         execute(listOf("设置温度$target"), transcript, decodeMs)
+    }
+
+    /** Read the live blower stage, change it by one and keep the public DiLink 2
+     *  control contract within its live-validated levels 1..7. */
+    private suspend fun dispatchRelativeFan(sign: Int, transcript: String, decodeMs: Long? = null) {
+        val fanLevel = gate.vehicleSnapshot()?.fanLevel
+        if (fanLevel == null) {
+            earcon.fail()
+            val reason = "Не знаю текущий уровень обдува"
+            _state.value = VoiceUiState.Blocked(reason)
+            record(VoiceJournalEntry.Route.NLU, transcript, withDecodeMs(transcript, decodeMs), VoiceJournalEntry.Outcome.BLOCKED, reason,
+                "NLU blocked (fanLevel unknown): transcript=\"$transcript\"")
+            announce("Голос", "Услышал: «$transcript». Отказ: $reason", "Не получилось")
+            return
+        }
+        val target = (fanLevel + sign).coerceIn(1, 7)
+        execute(listOf("设置风量$target"), transcript, decodeMs)
     }
 
     /** Media volume is not speed-gated (not a window op). Dispatch as a
@@ -792,6 +811,7 @@ class VoiceController @Inject constructor(
     private sealed interface Resolution {
         data class Cmd(val commands: List<String>) : Resolution
         data class RelTemp(val sign: Int) : Resolution
+        data class RelFan(val sign: Int) : Resolution
         data class Vol(val payload: String) : Resolution
         data class Auto(val ruleId: Long) : Resolution
     }
