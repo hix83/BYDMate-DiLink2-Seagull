@@ -581,6 +581,40 @@ private fun IntegrationsSection(state: SettingsUiState, viewModel: SettingsViewM
         }
     }
 
+    SectionHeader(text = stringResource(R.string.settings_telegram_section_header))
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = CardSurfaceElevated),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(stringResource(R.string.settings_telegram_description), fontSize = 12.sp)
+            SettingsTextField(
+                label = stringResource(R.string.settings_telegram_token_label),
+                value = state.telegramBotToken,
+                onValueChange = { viewModel.updateTelegramBotToken(it) },
+                keyboardType = KeyboardType.Password,
+                secret = true,
+            )
+            SettingsTextField(
+                label = stringResource(R.string.settings_telegram_chat_label),
+                value = state.telegramChatId,
+                onValueChange = { viewModel.updateTelegramChatId(it) },
+                keyboardType = KeyboardType.Text,
+            )
+            SettingActionRow(
+                title = stringResource(R.string.settings_telegram_send_button),
+                buttonLabel = stringResource(R.string.settings_telegram_send_button),
+                onClick = { viewModel.saveAndTestTelegram() },
+                style = SettingButtonStyle.Primary,
+            )
+            state.telegramStatus?.let { Text(it, color = AccentGreen, fontSize = 12.sp) }
+        }
+    }
+
     SectionHeader(text = stringResource(R.string.settings_ai_connections_header))
 
     ConnectionCard(

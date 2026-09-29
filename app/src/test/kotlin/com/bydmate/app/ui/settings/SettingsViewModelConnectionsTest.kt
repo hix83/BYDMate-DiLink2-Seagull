@@ -261,6 +261,7 @@ class SettingsViewModelConnectionsTest {
             agentOrchestrator = agentOrchestrator,
             llmConnectionResolver = llmConnectionResolver,
             openRouterClient = openRouterClient,
+            telegramReportClient = com.bydmate.app.data.remote.TelegramReportClient(httpClient),
             placeRepository = mockk(relaxed = true),
             energyDataDeadDetector = mockk(relaxed = true),
             hudController = mockk(relaxed = true),

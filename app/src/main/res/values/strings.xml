@@ -115,6 +115,14 @@
     <string name="settings_webhook_save_button">Сохранить вебхук</string>
     <string name="settings_webhook_saved">Вебхук сохранён</string>
     <string name="settings_webhook_invalid_url">Неверный URL</string>
+    <string name="settings_telegram_section_header">Telegram — отчёт</string>
+    <string name="settings_telegram_description">Укажите токен собственного бота и chat_id. Кнопка сохранит настройки и отправит отчёт о последней поездке.</string>
+    <string name="settings_telegram_token_label">Токен бота</string>
+    <string name="settings_telegram_chat_label">Chat ID</string>
+    <string name="settings_telegram_send_button">Сохранить и отправить отчёт</string>
+    <string name="settings_telegram_sending">Отправка…</string>
+    <string name="settings_telegram_sent">Отчёт отправлен</string>
+    <string name="settings_telegram_error">Не удалось отправить отчёт. Проверьте токен, chat_id и интернет.</string>
     <string name="settings_openrouter_section_header">OpenRouter</string>
     <string name="settings_openrouter_api_key_label">OpenRouter API Key</string>
     <string name="settings_openrouter_model_selected">Модель: %1$s</string>

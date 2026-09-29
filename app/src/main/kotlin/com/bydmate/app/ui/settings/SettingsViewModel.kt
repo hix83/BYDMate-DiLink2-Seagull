@@ -27,6 +27,7 @@ import com.bydmate.app.data.remote.InsightsManager
 import com.bydmate.app.data.remote.LlmHttpException
 import com.bydmate.app.data.remote.OpenRouterClient
 import com.bydmate.app.data.remote.OpenRouterModel
+import com.bydmate.app.data.remote.TelegramReportClient
 import com.bydmate.app.data.local.entity.PlaceEntity
 import com.bydmate.app.data.repository.ChargeRepository
 import com.bydmate.app.data.repository.PlaceRepository
@@ -129,6 +130,9 @@ data class SettingsUiState(
     val webhookSecret: String = "",
     val webhookSendLocation: Boolean = false,
     val webhookSaveStatus: String? = null,
+    val telegramBotToken: String = "",
+    val telegramChatId: String = "",
+    val telegramStatus: String? = null,
     /** Status of the last config backup/restore operation. Red if starts with error prefix. */
     val configStatus: String? = null,
     val mapTileSource: String = SettingsRepository.DEFAULT_MAP_TILE_SOURCE,
@@ -224,6 +228,7 @@ class SettingsViewModel @Inject constructor(
     private val agentOrchestrator: AgentOrchestrator,
     private val llmConnectionResolver: LlmConnectionResolver,
     private val openRouterClient: OpenRouterClient,
+    private val telegramReportClient: TelegramReportClient,
     private val placeRepository: PlaceRepository,
     private val energyDataDeadDetector: com.bydmate.app.data.local.EnergyDataDeadDetector,
     private val hudController: com.bydmate.app.hud.HudController,
@@ -335,6 +340,8 @@ class SettingsViewModel @Inject constructor(
             val webhookUrl = settingsRepository.getString(SettingsRepository.KEY_WEBHOOK_URL, "")
             val webhookSecret = settingsRepository.getString(SettingsRepository.KEY_WEBHOOK_SECRET, "")
             val webhookSendLocation = settingsRepository.getString(SettingsRepository.KEY_WEBHOOK_SEND_LOCATION, "false") == "true"
+            val telegramBotToken = settingsRepository.getString(SettingsRepository.KEY_TELEGRAM_BOT_TOKEN, "")
+            val telegramChatId = settingsRepository.getString(SettingsRepository.KEY_TELEGRAM_CHAT_ID, "")
             val mapTileSource = settingsRepository.getMapTileSource()
             val disableNativeAssistant =
                 settingsRepository.getString(SettingsRepository.KEY_DISABLE_NATIVE_ASSISTANT, "false") == "true"
@@ -419,6 +426,8 @@ class SettingsViewModel @Inject constructor(
                     webhookUrl = webhookUrl,
                     webhookSecret = webhookSecret,
                     webhookSendLocation = webhookSendLocation,
+                    telegramBotToken = telegramBotToken,
+                    telegramChatId = telegramChatId,
                     mapTileSource = mapTileSource,
                     disableNativeAssistant = disableNativeAssistant,
                     voiceEnabled = voiceEnabled,
@@ -1064,6 +1073,29 @@ class SettingsViewModel @Inject constructor(
             }
             delay(2000)
             _uiState.update { it.copy(webhookSaveStatus = null) }
+        }
+    }
+
+    fun updateTelegramBotToken(value: String) {
+        _uiState.update { it.copy(telegramBotToken = value) }
+    }
+
+    fun updateTelegramChatId(value: String) {
+        _uiState.update { it.copy(telegramChatId = value) }
+    }
+
+    fun saveAndTestTelegram() {
+        val token = _uiState.value.telegramBotToken.trim()
+        val chatId = _uiState.value.telegramChatId.trim()
+        viewModelScope.launch {
+            settingsRepository.setString(SettingsRepository.KEY_TELEGRAM_BOT_TOKEN, token)
+            settingsRepository.setString(SettingsRepository.KEY_TELEGRAM_CHAT_ID, chatId)
+            _uiState.update { it.copy(telegramBotToken = token, telegramChatId = chatId, telegramStatus = appContext.getString(R.string.settings_telegram_sending)) }
+            val trip = tripRepository.getLastTrip().firstOrNull()
+            val result = telegramReportClient.send(token, chatId, TelegramReportClient.buildLastTripReport(trip))
+            _uiState.update {
+                it.copy(telegramStatus = appContext.getString(if (result.isSuccess) R.string.settings_telegram_sent else R.string.settings_telegram_error))
+            }
         }
     }
 
