@@ -21,7 +21,7 @@ class TelegramReportClientTest {
 
         assertTrue(text.contains("12.3 км"))
         assertTrue(text.contains("2.50 кВт·ч"))
-        assertTrue(text.contains("80% → 74%"))
+        assertTrue(text.contains("<b>80%</b> → <b>74%</b>"))
     }
 
     @Test

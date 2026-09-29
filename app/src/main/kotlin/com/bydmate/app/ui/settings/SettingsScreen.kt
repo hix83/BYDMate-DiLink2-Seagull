@@ -605,6 +605,12 @@ private fun IntegrationsSection(state: SettingsUiState, viewModel: SettingsViewM
                 onValueChange = { viewModel.updateTelegramChatId(it) },
                 keyboardType = KeyboardType.Text,
             )
+            SettingToggleRow(
+                title = stringResource(R.string.settings_telegram_auto_label),
+                description = stringResource(R.string.settings_telegram_auto_description),
+                checked = state.telegramAutoReport,
+                onCheckedChange = { viewModel.toggleTelegramAutoReport(it) },
+            )
             SettingActionRow(
                 title = stringResource(R.string.settings_telegram_send_button),
                 buttonLabel = stringResource(R.string.settings_telegram_send_button),

@@ -98,6 +98,7 @@ class TrackingService : Service(), LocationListener {
     @Inject lateinit var adbRestoreManager: Lazy<com.bydmate.app.data.autoservice.AdbRestoreManager>
     @Inject lateinit var iternioTelemetryClient: IternioTelemetryClient
     @Inject lateinit var webhookTelemetryClient: WebhookTelemetryClient
+    @Inject lateinit var telegramReportManager: com.bydmate.app.data.remote.TelegramReportManager
     @Inject lateinit var lastSessionRepository: com.bydmate.app.data.repository.LastSessionRepository
     @Inject lateinit var sharedAdaptiveLoop: com.bydmate.app.data.loop.SharedAdaptiveLoop
     @Inject lateinit var tripRecorder: com.bydmate.app.data.trips.TripRecorder
@@ -646,6 +647,7 @@ class TrackingService : Service(), LocationListener {
         serviceScope.launch { readLogsGrant.ensure("startup") }
         registerScreenWakeReceiver()
         registerAdbRestoreNetworkCallback()
+        serviceScope.launch { telegramReportManager.drain("service_start") }
 
         // Start the network monitor BEFORE polling so the first evaluate() tick
         // already has access to the latest VALIDATED edge state.
@@ -794,6 +796,11 @@ class TrackingService : Service(), LocationListener {
             val idleFor = now - sessionLastActiveTs
             if (idleFor >= SESSION_IDLE_CLOSE_MS) {
                 Log.i(TAG, "Widget session END (idle ${idleFor / 1000}s, powerOn=$powerOn, driving=$driving)")
+                val reportTripKm = _tripDistanceKm.value
+                val reportTripKwh = _tripKwhConsumed.value
+                val reportStartedAt = currentSession
+                val reportRangeKm = _lastRangeKm.value
+                val reportLocation = _lastLocation.value
                 lastSessionRepository.onSessionEnd(soc = data.soc, ts = now)
                 _sessionStartedAt.value = null
                 sessionStartMileageKm = null
@@ -806,6 +813,17 @@ class TrackingService : Service(), LocationListener {
                 serviceScope.launch {
                     cachedLastTripAvg = tripRepository.getLastTripAvgConsumption()
                     Log.d(TAG, "Refreshed cachedLastTripAvg after session end: $cachedLastTripAvg")
+                    runCatching {
+                        telegramReportManager.sendPowerOffReport(
+                            data = data,
+                            rangeKm = reportRangeKm,
+                            tripKm = reportTripKm,
+                            tripKwh = reportTripKwh,
+                            startedAtMs = reportStartedAt,
+                            location = reportLocation,
+                            nowMs = now,
+                        )
+                    }.onFailure { Log.w(TAG, "Telegram power-off report failed", it) }
                 }
             }
             // else: grace period — keep session alive through brief blip
@@ -1533,7 +1551,10 @@ class TrackingService : Service(), LocationListener {
             private var validated: Network? = null
 
             override fun onAvailable(network: Network) {
-                serviceScope.launch { adbRestoreManager.get().attemptIfNeeded("wifi") }
+                serviceScope.launch {
+                    adbRestoreManager.get().attemptIfNeeded("wifi")
+                    telegramReportManager.drain("network_available")
+                }
             }
 
             override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
@@ -1543,7 +1564,10 @@ class TrackingService : Service(), LocationListener {
                 }
                 if (validated == network) return
                 validated = network
-                serviceScope.launch { adbRestoreManager.get().attemptIfNeeded("wifi_validated") }
+                serviceScope.launch {
+                    adbRestoreManager.get().attemptIfNeeded("wifi_validated")
+                    telegramReportManager.drain("network_validated")
+                }
             }
 
             override fun onLost(network: Network) {

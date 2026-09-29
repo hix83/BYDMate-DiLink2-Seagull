@@ -28,6 +28,7 @@ class TelegramReportClient @Inject constructor(
                 val body = FormBody.Builder()
                     .add("chat_id", cleanChatId)
                     .add("text", text.take(4096))
+                    .add("parse_mode", "HTML")
                     .add("disable_web_page_preview", "true")
                     .build()
                 val request = Request.Builder()
@@ -48,19 +49,19 @@ class TelegramReportClient @Inject constructor(
         private val TOKEN = Regex("^[0-9]{6,}:[A-Za-z0-9_-]{20,}$")
 
         internal fun buildLastTripReport(trip: TripEntity?): String {
-            val header = "BYDMate — отчёт"
+            val header = "<b>BYDMate — отчёт</b>"
             if (trip == null) return "$header\n\nПоездок пока нет. Подключение к боту работает."
             val formatter = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
             val lines = mutableListOf(
                 header,
                 "",
-                "Последняя поездка: ${formatter.format(Date(trip.startTs))}",
+                "🚗 <b>Последняя поездка</b> ${formatter.format(Date(trip.startTs))}",
             )
-            trip.distanceKm?.let { lines += "Пробег: ${format(it, 1)} км" }
-            trip.kwhConsumed?.let { lines += "Энергия: ${format(it, 2)} кВт·ч" }
-            trip.kwhPer100km?.let { lines += "Расход: ${format(it, 1)} кВт·ч/100 км" }
+            trip.distanceKm?.let { lines += "  ${format(it, 1)} км" }
+            trip.kwhConsumed?.let { lines += "⚡ Энергия: ${format(it, 2)} кВт·ч" }
+            trip.kwhPer100km?.let { lines += "📊 Расход: ${format(it, 1)} кВт·ч/100 км" }
             if (trip.socStart != null || trip.socEnd != null) {
-                lines += "Заряд: ${trip.socStart?.let { "$it%" } ?: "—"} → ${trip.socEnd?.let { "$it%" } ?: "—"}"
+                lines += "🔋 Заряд: <b>${trip.socStart?.let { "$it%" } ?: "—"}</b> → <b>${trip.socEnd?.let { "$it%" } ?: "—"}</b>"
             }
             trip.avgSpeedKmh?.let { lines += "Средняя скорость: ${format(it, 1)} км/ч" }
             trip.exteriorTemp?.let { lines += "Температура: $it °C" }

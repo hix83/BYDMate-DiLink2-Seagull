@@ -132,6 +132,7 @@ data class SettingsUiState(
     val webhookSaveStatus: String? = null,
     val telegramBotToken: String = "",
     val telegramChatId: String = "",
+    val telegramAutoReport: Boolean = false,
     val telegramStatus: String? = null,
     /** Status of the last config backup/restore operation. Red if starts with error prefix. */
     val configStatus: String? = null,
@@ -342,6 +343,7 @@ class SettingsViewModel @Inject constructor(
             val webhookSendLocation = settingsRepository.getString(SettingsRepository.KEY_WEBHOOK_SEND_LOCATION, "false") == "true"
             val telegramBotToken = settingsRepository.getString(SettingsRepository.KEY_TELEGRAM_BOT_TOKEN, "")
             val telegramChatId = settingsRepository.getString(SettingsRepository.KEY_TELEGRAM_CHAT_ID, "")
+            val telegramAutoReport = settingsRepository.getString(SettingsRepository.KEY_TELEGRAM_AUTO_REPORT, "false") == "true"
             val mapTileSource = settingsRepository.getMapTileSource()
             val disableNativeAssistant =
                 settingsRepository.getString(SettingsRepository.KEY_DISABLE_NATIVE_ASSISTANT, "false") == "true"
@@ -428,6 +430,7 @@ class SettingsViewModel @Inject constructor(
                     webhookSendLocation = webhookSendLocation,
                     telegramBotToken = telegramBotToken,
                     telegramChatId = telegramChatId,
+                    telegramAutoReport = telegramAutoReport,
                     mapTileSource = mapTileSource,
                     disableNativeAssistant = disableNativeAssistant,
                     voiceEnabled = voiceEnabled,
@@ -1082,6 +1085,13 @@ class SettingsViewModel @Inject constructor(
 
     fun updateTelegramChatId(value: String) {
         _uiState.update { it.copy(telegramChatId = value) }
+    }
+
+    fun toggleTelegramAutoReport(enabled: Boolean) {
+        _uiState.update { it.copy(telegramAutoReport = enabled) }
+        viewModelScope.launch {
+            settingsRepository.setString(SettingsRepository.KEY_TELEGRAM_AUTO_REPORT, enabled.toString())
+        }
     }
 
     fun saveAndTestTelegram() {

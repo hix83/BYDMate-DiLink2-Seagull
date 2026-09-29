@@ -76,6 +76,8 @@ open class SettingsRepository @Inject constructor(
         const val KEY_WEBHOOK_SEND_LOCATION = "webhook_send_location"
         const val KEY_TELEGRAM_BOT_TOKEN = "telegram_bot_token"
         const val KEY_TELEGRAM_CHAT_ID = "telegram_chat_id"
+        const val KEY_TELEGRAM_AUTO_REPORT = "telegram_auto_report"
+        const val KEY_TELEGRAM_OUTBOX = "telegram_report_outbox"
         const val KEY_DATA_SOURCE = "data_source"
         const val KEY_MAP_TILE_SOURCE = "map_tile_source"
         const val KEY_AUTOSERVICE_ENABLED = "autoservice_enabled"

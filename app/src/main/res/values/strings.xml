@@ -119,6 +119,8 @@
     <string name="settings_telegram_description">Укажите токен собственного бота и chat_id. Кнопка сохранит настройки и отправит отчёт о последней поездке.</string>
     <string name="settings_telegram_token_label">Токен бота</string>
     <string name="settings_telegram_chat_label">Chat ID</string>
+    <string name="settings_telegram_auto_label">Отчёт после выключения машины</string>
+    <string name="settings_telegram_auto_description">Автоматически отправляет состояние машины и итог поездки. Если интернета нет, отчёт сохранится и уйдёт позже.</string>
     <string name="settings_telegram_send_button">Сохранить и отправить отчёт</string>
     <string name="settings_telegram_sending">Отправка…</string>
     <string name="settings_telegram_sent">Отчёт отправлен</string>
