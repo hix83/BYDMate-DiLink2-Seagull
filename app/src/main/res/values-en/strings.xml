@@ -115,6 +115,13 @@
     <string name="settings_telegram_sending">Sending…</string>
     <string name="settings_telegram_sent">Report sent</string>
     <string name="settings_telegram_error">Could not send the report. Check the token, chat_id, and internet connection.</string>
+    <string name="settings_telegram_step_token">Token</string><string name="settings_telegram_step_code">Code</string><string name="settings_telegram_step_done">Done</string>
+    <string name="settings_telegram_connected_as">Connected @%1$s, chat: %2$s</string><string name="settings_telegram_disconnect">Disconnect</string>
+    <string name="settings_telegram_code_instruction">Send this code to @%1$s in a private chat, then tap Check again.</string><string name="settings_telegram_check_button">Check</string><string name="settings_telegram_back">Back</string>
+    <string name="settings_telegram_code_not_received">The bot has not received the code yet</string><string name="settings_telegram_greeting">BYDMate connected. Reports will arrive here.</string><string name="settings_telegram_error_detail">Telegram error: %1$s</string>
+    <string name="settings_telegram_copy_code">Copy code</string>
+    <string name="settings_telegram_code_copied">Code copied</string>
+    <string name="settings_telegram_report_items">Report contents</string>
     <string name="settings_openrouter_section_header">OpenRouter</string>
     <string name="settings_openrouter_api_key_label">OpenRouter API Key</string>
     <string name="settings_openrouter_model_selected">Model: %1$s</string>
@@ -579,8 +586,6 @@
     <string name="charges_day_yesterday">yesterday</string>
 
     <!-- Common duration formats -->
-    <string name="common_duration_hours_minutes">%1$d h %2$d min</string>
-    <string name="common_duration_minutes">%1$d min</string>
 
     <!-- Automation confirm overlay buttons -->
     <string name="confirm_overlay_cancel">Cancel</string>
@@ -1106,4 +1111,53 @@
     <string name="settings_adb_restore_status_connecting">Restoring…</string>
     <string name="settings_adb_restore_status_restored">Restored at %1$s</string>
     <string name="settings_adb_restore_status_failed">Error: %1$s</string>
+    <string name="common_duration_hours_minutes">%1$d h %2$d min</string>
+    <string name="common_duration_minutes">%1$d min</string>
+    <string name="tg_report_field_location">Location on the map</string>
+    <string name="tg_report_field_soc">Charge</string>
+    <string name="tg_report_field_range">Range</string>
+    <string name="tg_report_field_odometer">Odometer</string>
+    <string name="tg_report_field_trip">Trip</string>
+    <string name="tg_report_field_temps">Temperature</string>
+    <string name="tg_report_field_openings">What is open</string>
+    <string name="tg_report_field_tires">Tire pressure</string>
+    <string name="tg_report_header_off">BYDMate: car turned off at %1$s</string>
+    <string name="tg_report_map_link">Open on the map</string>
+    <string name="tg_report_soc">charge %1$s</string>
+    <string name="tg_report_soc_value">%1$d%%</string>
+    <string name="tg_report_range">range %1$s</string>
+    <string name="tg_report_trip_now">Trip</string>
+    <string name="tg_report_trip_last">Last trip</string>
+    <string name="tg_report_trip_when">%1$s at %2$s</string>
+    <string name="tg_report_trip_distance_time">%1$s in %2$s</string>
+    <string name="tg_report_trip_km">%1$.1f km</string>
+    <string name="tg_report_trip_km_whole">%1$d km</string>
+    <string name="tg_report_odometer">Odometer %1$,d km</string>
+    <string name="tg_report_trip_consumption">Consumption %1$.1f kWh/100 km</string>
+    <string name="tg_report_temp_outside">outside %1$+d°</string>
+    <string name="tg_report_temp_inside">cabin %1$+d°</string>
+    <string name="tg_report_open_list">Open: %1$s</string>
+    <string name="tg_report_all_closed">Everything is closed</string>
+    <string name="tg_report_open_door_fl">driver door</string>
+    <string name="tg_report_open_door_fr">passenger door</string>
+    <string name="tg_report_open_door_rl">rear left door</string>
+    <string name="tg_report_open_door_rr">rear right door</string>
+    <string name="tg_report_open_sunroof">sunroof</string>
+    <string name="tg_report_open_trunk">trunk</string>
+    <string name="tg_report_open_front_trunk">front trunk</string>
+    <string name="tg_report_open_hood">hood</string>
+    <string name="tg_report_tires">Tires: %1$s bar</string>
+    <string name="tg_report_tire_fl">FL %1$s</string>
+    <string name="tg_report_tire_fr">FR %1$s</string>
+    <string name="tg_report_tire_rl">RL %1$s</string>
+    <string name="tg_report_tire_rr">RR %1$s</string>
+    <string name="tg_report_recorded_at">(recorded at %1$s)</string>
+    <string name="tg_report_field_location_desc">An «Open on the map» link</string>
+    <string name="tg_report_field_soc_desc">Battery percent</string>
+    <string name="tg_report_field_range_desc">Kilometers, as on Home</string>
+    <string name="tg_report_field_odometer_desc">Total distance of the car</string>
+    <string name="tg_report_field_trip_desc">Kilometers, consumption and driving time</string>
+    <string name="tg_report_field_temps_desc">Outside and in the cabin</string>
+    <string name="tg_report_field_openings_desc">Doors, windows, sunroof, trunk, hood</string>
+    <string name="tg_report_field_tires_desc">All four wheels</string>
 </resources>

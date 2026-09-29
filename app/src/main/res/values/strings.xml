@@ -125,6 +125,20 @@
     <string name="settings_telegram_sending">Отправка…</string>
     <string name="settings_telegram_sent">Отчёт отправлен</string>
     <string name="settings_telegram_error">Не удалось отправить отчёт. Проверьте токен, chat_id и интернет.</string>
+    <string name="settings_telegram_step_token">Токен</string>
+    <string name="settings_telegram_step_code">Код</string>
+    <string name="settings_telegram_step_done">Готово</string>
+    <string name="settings_telegram_connected_as">Подключён @%1$s, чат: %2$s</string>
+    <string name="settings_telegram_disconnect">Отключить</string>
+    <string name="settings_telegram_code_instruction">Отправьте этот код в личный чат с @%1$s, затем снова нажмите «Проверить».</string>
+    <string name="settings_telegram_check_button">Проверить</string>
+    <string name="settings_telegram_back">Назад</string>
+    <string name="settings_telegram_code_not_received">Код ещё не получен ботом</string>
+    <string name="settings_telegram_greeting">BYDMate подключён. Сюда будут приходить отчёты.</string>
+    <string name="settings_telegram_error_detail">Ошибка Telegram: %1$s</string>
+    <string name="settings_telegram_copy_code">Копировать код</string>
+    <string name="settings_telegram_code_copied">Код скопирован</string>
+    <string name="settings_telegram_report_items">Что включать в отчёт</string>
     <string name="settings_openrouter_section_header">OpenRouter</string>
     <string name="settings_openrouter_api_key_label">OpenRouter API Key</string>
     <string name="settings_openrouter_model_selected">Модель: %1$s</string>
@@ -732,8 +746,6 @@
     <string name="charges_day_yesterday">вчера</string>
 
     <!-- Common duration formats -->
-    <string name="common_duration_hours_minutes">%1$d ч %2$d мин</string>
-    <string name="common_duration_minutes">%1$d мин</string>
 
     <!-- Automation confirm overlay buttons -->
     <string name="confirm_overlay_cancel">Отмена</string>
@@ -1260,4 +1272,53 @@
     <string name="settings_adb_restore_status_connecting">Восстанавливаем…</string>
     <string name="settings_adb_restore_status_restored">Восстановлено в %1$s</string>
     <string name="settings_adb_restore_status_failed">Ошибка: %1$s</string>
+    <string name="common_duration_hours_minutes">%1$d ч %2$d мин</string>
+    <string name="common_duration_minutes">%1$d мин</string>
+    <string name="tg_report_field_location">Место на карте</string>
+    <string name="tg_report_field_soc">Заряд</string>
+    <string name="tg_report_field_range">Запас хода</string>
+    <string name="tg_report_field_odometer">Пробег</string>
+    <string name="tg_report_field_trip">Поездка</string>
+    <string name="tg_report_field_temps">Температура</string>
+    <string name="tg_report_field_openings">Что открыто</string>
+    <string name="tg_report_field_tires">Давление в шинах</string>
+    <string name="tg_report_header_off">BYDMate: машина выключена в %1$s</string>
+    <string name="tg_report_map_link">Открыть на карте</string>
+    <string name="tg_report_soc">заряд %1$s</string>
+    <string name="tg_report_soc_value">%1$d%%</string>
+    <string name="tg_report_range">запас %1$s</string>
+    <string name="tg_report_trip_now">Поездка</string>
+    <string name="tg_report_trip_last">Последняя поездка</string>
+    <string name="tg_report_trip_when">%1$s в %2$s</string>
+    <string name="tg_report_trip_distance_time">%1$s за %2$s</string>
+    <string name="tg_report_trip_km">%1$.1f км</string>
+    <string name="tg_report_trip_km_whole">%1$d км</string>
+    <string name="tg_report_odometer">Пробег %1$,d км</string>
+    <string name="tg_report_trip_consumption">Расход %1$.1f кВт·ч/100 км</string>
+    <string name="tg_report_temp_outside">снаружи %1$+d°</string>
+    <string name="tg_report_temp_inside">в салоне %1$+d°</string>
+    <string name="tg_report_open_list">Открыто: %1$s</string>
+    <string name="tg_report_all_closed">Всё закрыто</string>
+    <string name="tg_report_open_door_fl">дверь водителя</string>
+    <string name="tg_report_open_door_fr">дверь пассажира</string>
+    <string name="tg_report_open_door_rl">задняя левая дверь</string>
+    <string name="tg_report_open_door_rr">задняя правая дверь</string>
+    <string name="tg_report_open_sunroof">люк</string>
+    <string name="tg_report_open_trunk">багажник</string>
+    <string name="tg_report_open_front_trunk">передний багажник</string>
+    <string name="tg_report_open_hood">капот</string>
+    <string name="tg_report_tires">Шины: %1$s бар</string>
+    <string name="tg_report_tire_fl">ПЛ %1$s</string>
+    <string name="tg_report_tire_fr">ПП %1$s</string>
+    <string name="tg_report_tire_rl">ЗЛ %1$s</string>
+    <string name="tg_report_tire_rr">ЗП %1$s</string>
+    <string name="tg_report_recorded_at">(записано в %1$s)</string>
+    <string name="tg_report_field_location_desc">Ссылка «Открыть на карте»</string>
+    <string name="tg_report_field_soc_desc">Процент батареи</string>
+    <string name="tg_report_field_range_desc">Километры, как на Главной</string>
+    <string name="tg_report_field_odometer_desc">Общий пробег машины</string>
+    <string name="tg_report_field_trip_desc">Километры, расход и время в пути</string>
+    <string name="tg_report_field_temps_desc">Снаружи и в салоне</string>
+    <string name="tg_report_field_openings_desc">Двери, окна, люк, багажник, капот</string>
+    <string name="tg_report_field_tires_desc">Все четыре колеса</string>
 </resources>

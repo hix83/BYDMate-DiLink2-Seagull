@@ -1,5 +1,7 @@
 package com.bydmate.app.data.repository
 
+import com.bydmate.app.data.backup.TgBackupConfig
+import com.bydmate.app.data.telegram.ReportField
 import com.bydmate.app.data.local.LocalePreferences
 import com.bydmate.app.data.local.dao.SettingsDao
 import com.bydmate.app.data.local.entity.SettingEntity
@@ -78,6 +80,9 @@ open class SettingsRepository @Inject constructor(
         const val KEY_TELEGRAM_CHAT_ID = "telegram_chat_id"
         const val KEY_TELEGRAM_AUTO_REPORT = "telegram_auto_report"
         const val KEY_TELEGRAM_OUTBOX = "telegram_report_outbox"
+        const val KEY_TG_BACKUP_BOT_NAME = "tg_backup_bot_name"
+        const val KEY_TG_BACKUP_CHAT_NAME = "tg_backup_chat_name"
+        const val KEY_TG_REPORT_FIELDS = "tg_report_off_fields"
         const val KEY_DATA_SOURCE = "data_source"
         const val KEY_MAP_TILE_SOURCE = "map_tile_source"
         const val KEY_AUTOSERVICE_ENABLED = "autoservice_enabled"
@@ -158,6 +163,29 @@ open class SettingsRepository @Inject constructor(
     /** Writes all key/value pairs in one Room transaction (all or nothing). */
     suspend fun setStrings(values: Map<String, String>) =
         settingsDao.setAll(values.map { (k, v) -> SettingEntity(k, v) })
+
+    suspend fun getTgBackupConfig(): TgBackupConfig = TgBackupConfig(
+        token = getString(KEY_TELEGRAM_BOT_TOKEN, ""),
+        chatId = getString(KEY_TELEGRAM_CHAT_ID, "").toLongOrNull(),
+        botName = getString(KEY_TG_BACKUP_BOT_NAME, ""),
+        chatName = getString(KEY_TG_BACKUP_CHAT_NAME, ""),
+    )
+
+    suspend fun saveTgBackup(token: String, botName: String, chatId: Long?, chatName: String) =
+        setStrings(mapOf(
+            KEY_TELEGRAM_BOT_TOKEN to token,
+            KEY_TELEGRAM_CHAT_ID to (chatId?.toString() ?: ""),
+            KEY_TG_BACKUP_BOT_NAME to botName,
+            KEY_TG_BACKUP_CHAT_NAME to chatName,
+        ))
+
+    suspend fun clearTgBackup() = saveTgBackup("", "", null, "")
+
+    suspend fun getTgReportFields(): Set<ReportField> =
+        ReportField.parseCsv(settingsDao.get(KEY_TG_REPORT_FIELDS))
+
+    suspend fun setTgReportFields(fields: Set<ReportField>) =
+        setString(KEY_TG_REPORT_FIELDS, ReportField.toCsv(fields))
 
     suspend fun getBatteryCapacity(): Double =
         getString(KEY_BATTERY_CAPACITY, DEFAULT_BATTERY_CAPACITY).parseNumericSetting() ?: 72.9

@@ -18,6 +18,9 @@ import com.bydmate.app.agent.AgentResult
 import com.bydmate.app.agent.LlmConnectionResolver
 import com.bydmate.app.data.autoservice.AdbOnDeviceClient
 import com.bydmate.app.data.backup.BackupManager
+import com.bydmate.app.data.backup.TelegramBackupSink
+import com.bydmate.app.data.backup.TelegramChat
+import com.bydmate.app.data.backup.TelegramSinkException
 import com.bydmate.app.data.local.EnergyDataReader
 import com.bydmate.app.data.local.HistoryImporter
 import com.bydmate.app.data.local.LocalePreferences
@@ -28,6 +31,7 @@ import com.bydmate.app.data.remote.LlmHttpException
 import com.bydmate.app.data.remote.OpenRouterClient
 import com.bydmate.app.data.remote.OpenRouterModel
 import com.bydmate.app.data.remote.TelegramReportClient
+import com.bydmate.app.data.telegram.ReportField
 import com.bydmate.app.data.local.entity.PlaceEntity
 import com.bydmate.app.data.repository.ChargeRepository
 import com.bydmate.app.data.repository.PlaceRepository
@@ -74,6 +78,7 @@ import java.io.FileWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.security.SecureRandom
 import javax.inject.Inject
 
 /**
@@ -134,6 +139,12 @@ data class SettingsUiState(
     val telegramChatId: String = "",
     val telegramAutoReport: Boolean = false,
     val telegramStatus: String? = null,
+    val telegramBotName: String = "",
+    val telegramChatName: String = "",
+    val telegramBindCode: String? = null,
+    val telegramChecking: Boolean = false,
+    val telegramConnected: Boolean = false,
+    val telegramReportFields: Set<ReportField> = ReportField.DEFAULT,
     /** Status of the last config backup/restore operation. Red if starts with error prefix. */
     val configStatus: String? = null,
     val mapTileSource: String = SettingsRepository.DEFAULT_MAP_TILE_SOURCE,
@@ -230,6 +241,7 @@ class SettingsViewModel @Inject constructor(
     private val llmConnectionResolver: LlmConnectionResolver,
     private val openRouterClient: OpenRouterClient,
     private val telegramReportClient: TelegramReportClient,
+    private val telegramBackupSink: TelegramBackupSink,
     private val placeRepository: PlaceRepository,
     private val energyDataDeadDetector: com.bydmate.app.data.local.EnergyDataDeadDetector,
     private val hudController: com.bydmate.app.hud.HudController,
@@ -344,6 +356,8 @@ class SettingsViewModel @Inject constructor(
             val telegramBotToken = settingsRepository.getString(SettingsRepository.KEY_TELEGRAM_BOT_TOKEN, "")
             val telegramChatId = settingsRepository.getString(SettingsRepository.KEY_TELEGRAM_CHAT_ID, "")
             val telegramAutoReport = settingsRepository.getString(SettingsRepository.KEY_TELEGRAM_AUTO_REPORT, "false") == "true"
+            val telegramConfig = settingsRepository.getTgBackupConfig()
+            val telegramReportFields = settingsRepository.getTgReportFields()
             val mapTileSource = settingsRepository.getMapTileSource()
             val disableNativeAssistant =
                 settingsRepository.getString(SettingsRepository.KEY_DISABLE_NATIVE_ASSISTANT, "false") == "true"
@@ -431,6 +445,10 @@ class SettingsViewModel @Inject constructor(
                     telegramBotToken = telegramBotToken,
                     telegramChatId = telegramChatId,
                     telegramAutoReport = telegramAutoReport,
+                    telegramBotName = telegramConfig.botName,
+                    telegramChatName = telegramConfig.chatName,
+                    telegramConnected = telegramConfig.configured,
+                    telegramReportFields = telegramReportFields,
                     mapTileSource = mapTileSource,
                     disableNativeAssistant = disableNativeAssistant,
                     voiceEnabled = voiceEnabled,
@@ -1080,7 +1098,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun updateTelegramBotToken(value: String) {
-        _uiState.update { it.copy(telegramBotToken = value) }
+        _uiState.update { it.copy(telegramBotToken = value.trim(), telegramStatus = null) }
     }
 
     fun updateTelegramChatId(value: String) {
@@ -1092,6 +1110,13 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.setString(SettingsRepository.KEY_TELEGRAM_AUTO_REPORT, enabled.toString())
         }
+    }
+
+    fun toggleTelegramReportField(field: ReportField) {
+        val fields = _uiState.value.telegramReportFields.let { if (field in it) it - field else it + field }
+        if (fields.isEmpty()) return
+        _uiState.update { it.copy(telegramReportFields = fields) }
+        viewModelScope.launch { settingsRepository.setTgReportFields(fields) }
     }
 
     fun saveAndTestTelegram() {
@@ -1108,6 +1133,62 @@ class SettingsViewModel @Inject constructor(
             }
         }
     }
+
+    private var telegramCheckJob: Job? = null
+
+    fun checkTelegramBot() {
+        val token = _uiState.value.telegramBotToken.trim()
+        if (token.isEmpty() || _uiState.value.telegramChecking) return
+        _uiState.update { it.copy(telegramChecking = true, telegramStatus = appContext.getString(R.string.settings_telegram_sending)) }
+        telegramCheckJob = viewModelScope.launch {
+            val botName = telegramBackupSink.getMe(token).getOrElse {
+                finishTelegramCheck(token, telegramError(it)); return@launch
+            }
+            val stored = settingsRepository.getTgBackupConfig()
+            val chat = if (stored.token == token && stored.chatId != null) {
+                TelegramChat(stored.chatId, stored.chatName)
+            } else {
+                val code = _uiState.value.telegramBindCode
+                if (code == null) {
+                    _uiState.update { it.copy(telegramChecking = false, telegramBindCode = newTelegramCode(), telegramBotName = botName, telegramStatus = null) }
+                    return@launch
+                }
+                telegramBackupSink.findPrivateChat(token, code).getOrElse {
+                    finishTelegramCheck(token, telegramError(it)); return@launch
+                } ?: run {
+                    finishTelegramCheck(token, appContext.getString(R.string.settings_telegram_code_not_received)); return@launch
+                }
+            }
+            telegramBackupSink.sendMessage(token, chat.id, appContext.getString(R.string.settings_telegram_greeting))
+                .getOrElse { finishTelegramCheck(token, telegramError(it)); return@launch }
+            if (_uiState.value.telegramBotToken != token) return@launch
+            settingsRepository.saveTgBackup(token, botName, chat.id, chat.name)
+            _uiState.update { it.copy(telegramChecking = false, telegramBindCode = null, telegramBotName = botName, telegramChatName = chat.name, telegramChatId = chat.id.toString(), telegramConnected = true, telegramStatus = null) }
+        }
+    }
+
+    fun cancelTelegramCode() {
+        telegramCheckJob?.cancel()
+        _uiState.update { it.copy(telegramBindCode = null, telegramChecking = false, telegramStatus = null) }
+    }
+
+    fun disconnectTelegramBot() {
+        telegramCheckJob?.cancel()
+        viewModelScope.launch { settingsRepository.clearTgBackup() }
+        _uiState.update { it.copy(telegramBotToken = "", telegramChatId = "", telegramBotName = "", telegramChatName = "", telegramBindCode = null, telegramConnected = false, telegramStatus = null) }
+        toggleTelegramAutoReport(false)
+    }
+
+    private fun finishTelegramCheck(token: String, status: String) {
+        _uiState.update { if (it.telegramBotToken == token) it.copy(telegramChecking = false, telegramStatus = status) else it.copy(telegramChecking = false) }
+    }
+
+    private fun telegramError(error: Throwable): String {
+        val key = (error as? TelegramSinkException)?.key ?: error.message ?: "?"
+        return appContext.getString(R.string.settings_telegram_error_detail, key)
+    }
+
+    private fun newTelegramCode(): String = (100_000 + SecureRandom().nextInt(900_000)).toString()
 
     fun saveMapTileSource(source: String) {
         _uiState.update { it.copy(mapTileSource = source) }

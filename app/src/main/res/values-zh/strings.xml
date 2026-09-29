@@ -102,6 +102,13 @@
     <string name="settings_telegram_sending">正在发送…</string>
     <string name="settings_telegram_sent">报告已发送</string>
     <string name="settings_telegram_error">无法发送报告。请检查令牌、chat_id 和网络连接。</string>
+    <string name="settings_telegram_step_token">令牌</string><string name="settings_telegram_step_code">验证码</string><string name="settings_telegram_step_done">完成</string>
+    <string name="settings_telegram_connected_as">已连接 @%1$s，聊天：%2$s</string><string name="settings_telegram_disconnect">断开连接</string>
+    <string name="settings_telegram_code_instruction">请在与 @%1$s 的私聊中发送此验证码，然后再次点击检查。</string><string name="settings_telegram_check_button">检查</string><string name="settings_telegram_back">返回</string>
+    <string name="settings_telegram_code_not_received">机器人尚未收到验证码</string><string name="settings_telegram_greeting">BYDMate 已连接，报告将发送到这里。</string><string name="settings_telegram_error_detail">Telegram 错误：%1$s</string>
+    <string name="settings_telegram_copy_code">复制代码</string>
+    <string name="settings_telegram_code_copied">代码已复制</string>
+    <string name="settings_telegram_report_items">报告内容</string>
     <string name="settings_openrouter_section_header">OpenRouter</string>
     <string name="settings_openrouter_api_key_label">OpenRouter API 密钥</string>
     <string name="settings_openrouter_model_selected">模型：%1$s</string>
@@ -658,8 +665,6 @@
     <string name="charges_day_yesterday">昨天</string>
 
     <!-- Common duration formats -->
-    <string name="common_duration_hours_minutes">%1$d 小时 %2$d 分钟</string>
-    <string name="common_duration_minutes">%1$d 分钟</string>
 
     <!-- Automation confirm overlay buttons -->
     <string name="confirm_overlay_cancel">取消</string>
@@ -1221,4 +1226,53 @@
     <string name="settings_adb_restore_status_connecting">正在恢复…</string>
     <string name="settings_adb_restore_status_restored">已于 %1$s 恢复</string>
     <string name="settings_adb_restore_status_failed">错误：%1$s</string>
+    <string name="common_duration_hours_minutes">%1$d 小时 %2$d 分钟</string>
+    <string name="common_duration_minutes">%1$d 分钟</string>
+    <string name="tg_report_field_location">地图位置</string>
+    <string name="tg_report_field_soc">电量</string>
+    <string name="tg_report_field_range">续航</string>
+    <string name="tg_report_field_odometer">总里程</string>
+    <string name="tg_report_field_trip">行程</string>
+    <string name="tg_report_field_temps">温度</string>
+    <string name="tg_report_field_openings">未关闭项</string>
+    <string name="tg_report_field_tires">胎压</string>
+    <string name="tg_report_header_off">BYDMate：车辆于 %1$s 熄火</string>
+    <string name="tg_report_map_link">在地图上打开</string>
+    <string name="tg_report_soc">电量 %1$s</string>
+    <string name="tg_report_soc_value">%1$d%%</string>
+    <string name="tg_report_range">续航 %1$s</string>
+    <string name="tg_report_trip_now">行程</string>
+    <string name="tg_report_trip_last">上次行程</string>
+    <string name="tg_report_trip_when">%1$s %2$s</string>
+    <string name="tg_report_trip_distance_time">%1$s，用时 %2$s</string>
+    <string name="tg_report_trip_km">%1$.1f 公里</string>
+    <string name="tg_report_trip_km_whole">%1$d 公里</string>
+    <string name="tg_report_odometer">总里程 %1$,d 公里</string>
+    <string name="tg_report_trip_consumption">能耗 %1$.1f kWh/100 公里</string>
+    <string name="tg_report_temp_outside">车外 %1$+d°</string>
+    <string name="tg_report_temp_inside">车内 %1$+d°</string>
+    <string name="tg_report_open_list">未关闭：%1$s</string>
+    <string name="tg_report_all_closed">全部已关闭</string>
+    <string name="tg_report_open_door_fl">主驾车门</string>
+    <string name="tg_report_open_door_fr">副驾车门</string>
+    <string name="tg_report_open_door_rl">左后车门</string>
+    <string name="tg_report_open_door_rr">右后车门</string>
+    <string name="tg_report_open_sunroof">天窗</string>
+    <string name="tg_report_open_trunk">后备箱</string>
+    <string name="tg_report_open_front_trunk">前备箱</string>
+    <string name="tg_report_open_hood">引擎盖</string>
+    <string name="tg_report_tires">胎压：%1$s bar</string>
+    <string name="tg_report_tire_fl">左前 %1$s</string>
+    <string name="tg_report_tire_fr">右前 %1$s</string>
+    <string name="tg_report_tire_rl">左后 %1$s</string>
+    <string name="tg_report_tire_rr">右后 %1$s</string>
+    <string name="tg_report_recorded_at">（记录于 %1$s）</string>
+    <string name="tg_report_field_location_desc">「在地图上打开」链接</string>
+    <string name="tg_report_field_soc_desc">电池百分比</string>
+    <string name="tg_report_field_range_desc">公里数，与主页相同</string>
+    <string name="tg_report_field_odometer_desc">车辆的总行驶里程</string>
+    <string name="tg_report_field_trip_desc">公里数、能耗和行驶时间</string>
+    <string name="tg_report_field_temps_desc">车外和车内</string>
+    <string name="tg_report_field_openings_desc">车门、车窗、天窗、后备箱、引擎盖</string>
+    <string name="tg_report_field_tires_desc">全部四个车轮</string>
 </resources>

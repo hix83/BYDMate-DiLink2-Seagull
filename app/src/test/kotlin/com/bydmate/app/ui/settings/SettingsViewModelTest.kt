@@ -283,6 +283,7 @@ class SettingsViewModelTest {
             llmConnectionResolver = llmConnectionResolver ?: mockk(relaxed = true),
             openRouterClient = openRouterClient,
             telegramReportClient = com.bydmate.app.data.remote.TelegramReportClient(httpClient),
+            telegramBackupSink = com.bydmate.app.data.backup.TelegramBackupSink(httpClient),
             placeRepository = mockk(relaxed = true),
             energyDataDeadDetector = energyDataDeadDetector,
             hudController = mockk(relaxed = true),

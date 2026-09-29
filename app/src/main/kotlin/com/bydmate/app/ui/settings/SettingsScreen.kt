@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings as AndroidSettings
+import android.widget.Toast
 import com.bydmate.app.cluster.ClusterEntryPoint
 import com.bydmate.app.cluster.ClusterProjectionManager
 import com.bydmate.app.cluster.CENTER_OFFSET_PCT
@@ -19,6 +20,7 @@ import dagger.hilt.android.EntryPointAccessors
 import kotlin.math.roundToInt
 import com.bydmate.app.ui.widget.WidgetController
 import com.bydmate.app.ui.widget.WidgetPreferences
+import com.bydmate.app.data.telegram.ReportField
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
@@ -85,6 +87,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material.icons.filled.Visibility
@@ -493,6 +497,9 @@ private fun BatterySection(state: SettingsUiState, viewModel: SettingsViewModel)
 
 @Composable
 private fun IntegrationsSection(state: SettingsUiState, viewModel: SettingsViewModel) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val codeCopied = stringResource(R.string.settings_telegram_code_copied)
     SectionHeader(text = stringResource(R.string.settings_abrp_section_header))
     Card(
         shape = RoundedCornerShape(12.dp),
@@ -592,32 +599,80 @@ private fun IntegrationsSection(state: SettingsUiState, viewModel: SettingsViewM
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(stringResource(R.string.settings_telegram_description), fontSize = 12.sp)
-            SettingsTextField(
-                label = stringResource(R.string.settings_telegram_token_label),
-                value = state.telegramBotToken,
-                onValueChange = { viewModel.updateTelegramBotToken(it) },
-                keyboardType = KeyboardType.Password,
-                secret = true,
+            Text(
+                when {
+                    state.telegramConnected -> "✓ 3. ${stringResource(R.string.settings_telegram_step_done)}"
+                    state.telegramBindCode != null -> "✓ 1. ${stringResource(R.string.settings_telegram_step_token)}   →   2. ${stringResource(R.string.settings_telegram_step_code)}"
+                    else -> "1. ${stringResource(R.string.settings_telegram_step_token)}   →   2. ${stringResource(R.string.settings_telegram_step_code)}   →   3. ${stringResource(R.string.settings_telegram_step_done)}"
+                },
+                color = if (state.telegramConnected) AccentGreen else TextSecondary,
+                fontSize = 12.sp,
             )
-            SettingsTextField(
-                label = stringResource(R.string.settings_telegram_chat_label),
-                value = state.telegramChatId,
-                onValueChange = { viewModel.updateTelegramChatId(it) },
-                keyboardType = KeyboardType.Text,
-            )
+            when {
+                state.telegramConnected -> {
+                    Text(stringResource(R.string.settings_telegram_connected_as, state.telegramBotName, state.telegramChatName), color = TextPrimary)
+                    TextButton(onClick = { viewModel.disconnectTelegramBot() }) {
+                        Text(stringResource(R.string.settings_telegram_disconnect), color = TextSecondary)
+                    }
+                }
+                state.telegramBindCode != null -> {
+                    Text(state.telegramBindCode, color = AccentGreen, fontSize = 26.sp)
+                    Text(stringResource(R.string.settings_telegram_code_instruction, state.telegramBotName), color = TextSecondary, fontSize = 12.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = {
+                            clipboard.setText(AnnotatedString(state.telegramBindCode))
+                            Toast.makeText(context, codeCopied, Toast.LENGTH_SHORT).show()
+                        }) {
+                            Text(stringResource(R.string.settings_telegram_copy_code))
+                        }
+                        Button(onClick = { viewModel.checkTelegramBot() }, enabled = !state.telegramChecking) {
+                            Text(stringResource(R.string.settings_telegram_check_button))
+                        }
+                        TextButton(onClick = { viewModel.cancelTelegramCode() }) {
+                            Text(stringResource(R.string.settings_telegram_back))
+                        }
+                    }
+                }
+                else -> {
+                    SettingsTextField(
+                        label = stringResource(R.string.settings_telegram_token_label),
+                        value = state.telegramBotToken,
+                        onValueChange = { viewModel.updateTelegramBotToken(it) },
+                        keyboardType = KeyboardType.Password,
+                        secret = true,
+                    )
+                    Button(onClick = { viewModel.checkTelegramBot() }, enabled = state.telegramBotToken.isNotBlank() && !state.telegramChecking) {
+                        Text(stringResource(R.string.settings_telegram_check_button))
+                    }
+                }
+            }
             SettingToggleRow(
                 title = stringResource(R.string.settings_telegram_auto_label),
                 description = stringResource(R.string.settings_telegram_auto_description),
-                checked = state.telegramAutoReport,
+                checked = state.telegramConnected && state.telegramAutoReport,
                 onCheckedChange = { viewModel.toggleTelegramAutoReport(it) },
+                enabled = state.telegramConnected,
             )
-            SettingActionRow(
-                title = stringResource(R.string.settings_telegram_send_button),
-                buttonLabel = stringResource(R.string.settings_telegram_send_button),
-                onClick = { viewModel.saveAndTestTelegram() },
-                style = SettingButtonStyle.Primary,
-            )
-            state.telegramStatus?.let { Text(it, color = AccentGreen, fontSize = 12.sp) }
+            if (state.telegramConnected && state.telegramAutoReport) {
+                Text(stringResource(R.string.settings_telegram_report_items), color = TextSecondary, fontSize = 12.sp)
+                ReportField.entries.forEach { field ->
+                    SettingToggleRow(
+                        title = stringResource(field.labelRes),
+                        description = stringResource(field.descRes),
+                        checked = field in state.telegramReportFields,
+                        onCheckedChange = { viewModel.toggleTelegramReportField(field) },
+                    )
+                }
+            }
+            if (state.telegramConnected) {
+                SettingActionRow(
+                    title = stringResource(R.string.settings_telegram_send_button),
+                    buttonLabel = stringResource(R.string.settings_telegram_send_button),
+                    onClick = { viewModel.saveAndTestTelegram() },
+                    style = SettingButtonStyle.Primary,
+                )
+            }
+            state.telegramStatus?.let { Text(it, color = if (it.contains("ошиб", true)) androidx.compose.material3.MaterialTheme.colorScheme.error else AccentGreen, fontSize = 12.sp) }
         }
     }
 

@@ -1,9 +1,17 @@
 package com.bydmate.app.data.remote
 
+import android.content.Context
 import android.location.Location
 import android.util.Log
 import com.bydmate.app.data.repository.SettingsRepository
 import com.bydmate.app.data.repository.TripRepository
+import com.bydmate.app.data.backup.TelegramBackupSink
+import com.bydmate.app.data.telegram.LiveTrip
+import com.bydmate.app.data.telegram.ReportField
+import com.bydmate.app.data.telegram.ReportInputs
+import com.bydmate.app.data.telegram.ReportStrings
+import com.bydmate.app.data.telegram.TelegramReportBuilder
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.firstOrNull
 import org.json.JSONArray
 import org.json.JSONObject
@@ -16,7 +24,8 @@ import javax.inject.Singleton
 
 @Singleton
 class TelegramReportManager @Inject constructor(
-    private val client: TelegramReportClient,
+    @ApplicationContext private val context: Context,
+    private val sink: TelegramBackupSink,
     private val settings: SettingsRepository,
     private val trips: TripRepository,
 ) {
@@ -33,7 +42,23 @@ class TelegramReportManager @Inject constructor(
     ) {
         if (settings.getString(SettingsRepository.KEY_TELEGRAM_AUTO_REPORT, "false") != "true") return
         val lastTrip = trips.getLastTrip().firstOrNull()
-        val text = buildPowerOffReport(data, rangeKm, tripKm, tripKwh, startedAtMs, location, lastTrip, nowMs)
+        val strings = ReportStrings { id, args -> context.getString(id, *args) }
+        val text = TelegramReportBuilder.build(
+            header = TelegramReportBuilder.powerOffHeader(strings),
+            customText = "",
+            fields = settings.getTgReportFields(),
+            inputs = ReportInputs(
+                data = data,
+                rangeKm = rangeKm,
+                latitude = location?.latitude,
+                longitude = location?.longitude,
+                liveTrip = if (tripKm != null && startedAtMs != null) LiveTrip(tripKm, tripKwh, startedAtMs) else null,
+                lastTrip = lastTrip,
+            ),
+            lang = context.resources.configuration.locales[0].language,
+            strings = strings,
+            nowMs = nowMs,
+        ).text.let { TelegramReportBuilder.fillTime(it, nowMs) }
         enqueue(Pending(UUID.randomUUID().toString().take(8), nowMs, text))
         drain("power_off")
     }
@@ -49,7 +74,8 @@ class TelegramReportManager @Inject constructor(
             val item = queue.first()
             val late = System.currentTimeMillis() - item.createdMs > LATE_MS
             val text = if (late) item.text + "\n\n<i>Записано ${time(item.createdMs)}, отправлено позже</i>" else item.text
-            if (client.send(token, chat, text).isFailure) return
+            val chatId = chat.toLongOrNull() ?: return
+            if (sink.sendMessage(token, chatId, text, parseMode = "HTML", linkPreview = false).isFailure) return
             queue = queue.drop(1)
             save(queue)
             Log.i(TAG, "outbox sent id=${item.id} left=${queue.size}")
