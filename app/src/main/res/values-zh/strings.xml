@@ -92,6 +92,16 @@
     <string name="settings_webhook_save_button">保存 Webhook</string>
     <string name="settings_webhook_saved">Webhook 已保存</string>
     <string name="settings_webhook_invalid_url">URL 无效</string>
+    <string name="settings_telegram_section_header">Telegram 报告</string>
+    <string name="settings_telegram_description">输入机器人令牌和 chat_id。按钮会保存设置并发送最近一次行程报告。</string>
+    <string name="settings_telegram_token_label">机器人令牌</string>
+    <string name="settings_telegram_chat_label">聊天 ID</string>
+    <string name="settings_telegram_auto_label">车辆关闭后发送报告</string>
+    <string name="settings_telegram_auto_description">自动发送车辆状态和行程摘要。无网络时会保存报告并稍后发送。</string>
+    <string name="settings_telegram_send_button">保存并发送报告</string>
+    <string name="settings_telegram_sending">正在发送…</string>
+    <string name="settings_telegram_sent">报告已发送</string>
+    <string name="settings_telegram_error">无法发送报告。请检查令牌、chat_id 和网络连接。</string>
     <string name="settings_openrouter_section_header">OpenRouter</string>
     <string name="settings_openrouter_api_key_label">OpenRouter API 密钥</string>
     <string name="settings_openrouter_model_selected">模型：%1$s</string>

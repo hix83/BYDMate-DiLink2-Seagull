@@ -106,6 +106,16 @@
     <string name="settings_webhook_save_button">Salvar webhook</string>
     <string name="settings_webhook_saved">Webhook salvo</string>
     <string name="settings_webhook_invalid_url">URL inválida</string>
+    <string name="settings_telegram_section_header">Relatório do Telegram</string>
+    <string name="settings_telegram_description">Informe o token do bot e o chat_id. O botão salva as configurações e envia o relatório da última viagem.</string>
+    <string name="settings_telegram_token_label">Token do bot</string>
+    <string name="settings_telegram_chat_label">ID do chat</string>
+    <string name="settings_telegram_auto_label">Relatório ao desligar o carro</string>
+    <string name="settings_telegram_auto_description">Envia automaticamente o estado do carro e o resumo da viagem. Sem internet, o relatório será salvo e enviado depois.</string>
+    <string name="settings_telegram_send_button">Salvar e enviar relatório</string>
+    <string name="settings_telegram_sending">Enviando…</string>
+    <string name="settings_telegram_sent">Relatório enviado</string>
+    <string name="settings_telegram_error">Não foi possível enviar. Verifique o token, o chat_id e a conexão.</string>
     <string name="settings_openrouter_api_key_label">Chave de API do OpenRouter</string>
     <string name="settings_openrouter_model_selected">Modelo: %1$s</string>
     <string name="settings_openrouter_model_pick">Escolher modelo</string>

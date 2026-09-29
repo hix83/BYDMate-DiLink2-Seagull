@@ -15,7 +15,7 @@ VER="${1:?usage: prepare-release.sh X.Y.Z}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CL="$ROOT/CHANGELOG.md"
 DATE="$(date +%Y-%m-%d)"
-URL="https://github.com/AndyShaman/BYDMate"
+URL="https://github.com/hix83/BYDMate-DiLink2-Seagull"
 
 # --- guard: [Unreleased] must actually have content ---
 UNREL="$(awk '/^## \[Unreleased\]/{f=1;next} /^## \[/{f=0} f' "$CL")"

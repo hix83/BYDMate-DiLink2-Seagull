@@ -86,17 +86,8 @@ class UpdateChecker @Inject constructor(
             return@withContext null // genuinely up to date
         }
 
-        val assets = json.optJSONArray("assets")
-            ?: throw Exception("Нет assets в релизе $tagName")
-        var apkUrl: String? = null
-        for (i in 0 until assets.length()) {
-            val asset = assets.getJSONObject(i)
-            val name = asset.optString("name", "")
-            if (name.endsWith(".apk")) {
-                apkUrl = asset.optString("browser_download_url")
-                break
-            }
-        }
+        val assets = json.optJSONArray("assets") ?: throw Exception("Нет assets в релизе $tagName")
+        val apkUrl = selectReleaseApk(tagName, assets)
 
         if (apkUrl == null) throw Exception("Нет APK в релизе $tagName")
 
@@ -223,7 +214,7 @@ class UpdateChecker @Inject constructor(
         }
     }
 
-    private fun isNewer(remote: String, local: String): Boolean {
+    internal fun isNewer(remote: String, local: String): Boolean {
         val r = remote.split(".").mapNotNull { it.toIntOrNull() }
         val l = local.split(".").mapNotNull { it.toIntOrNull() }
         for (i in 0 until maxOf(r.size, l.size)) {
@@ -233,5 +224,24 @@ class UpdateChecker @Inject constructor(
             if (rv < lv) return false
         }
         return false
+    }
+
+    /**
+     * Select only the arm64 release artifact produced for this update channel. A release may also
+     * contain a physical-debug build; installing that over a release build can fail because its
+     * signature differs. Exact name wins, with a conservative non-debug APK fallback for old tags.
+     */
+    internal fun selectReleaseApk(version: String, assets: org.json.JSONArray): String? {
+        val expected = "BYDMate-v$version.apk"
+        val candidates = (0 until assets.length()).map { assets.getJSONObject(it) }
+        return candidates.firstOrNull { it.optString("name") == expected }
+            ?.optString("browser_download_url")
+            ?.takeIf { it.isNotBlank() }
+            ?: candidates.firstOrNull {
+                val name = it.optString("name", "")
+                name.endsWith(".apk", ignoreCase = true) &&
+                    !name.contains("debug", ignoreCase = true) &&
+                    !name.contains("unsigned", ignoreCase = true)
+            }?.optString("browser_download_url")?.takeIf { it.isNotBlank() }
     }
 }

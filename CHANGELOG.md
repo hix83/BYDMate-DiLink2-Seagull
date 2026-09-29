@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [3.8.5] - 2026-09-29
+
 ### Новое
 - Вебхук телеметрии: живые данные ABRP (SOC, мощность, температуры, одометр, давление шин и зарядка) можно отправлять JSON POST-запросом на свой сервер с необязательной Bearer-авторизацией и отдельным включением координат.
 - В настройках интеграций можно подключить собственного Telegram-бота и отправить ему отчёт о последней поездке.
@@ -833,7 +835,8 @@
 ### Removed
 - `fallbackToDestructiveMigration`.
 
-[Unreleased]: https://github.com/AndyShaman/BYDMate/compare/v3.8.1...HEAD
+[Unreleased]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.5...HEAD
+[3.8.5]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.4...v3.8.5
 [3.8.1]: https://github.com/AndyShaman/BYDMate/compare/v3.8...v3.8.1
 [3.8]: https://github.com/AndyShaman/BYDMate/compare/v3.7...v3.8
 [3.7]: https://github.com/AndyShaman/BYDMate/compare/v3.6.3...v3.7
