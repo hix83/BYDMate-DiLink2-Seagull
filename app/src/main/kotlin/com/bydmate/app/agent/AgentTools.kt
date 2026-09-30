@@ -2,6 +2,7 @@ package com.bydmate.app.agent
 
 import android.content.Context
 import android.content.Intent
+import android.os.SystemClock
 import com.bydmate.app.cluster.ClusterMode
 import com.bydmate.app.cluster.ClusterVoiceControl
 import com.bydmate.app.data.automation.ActionDispatcher
@@ -33,6 +34,8 @@ import com.bydmate.app.data.vehicle.CommandTranslator
 import com.bydmate.app.domain.battery.BatteryStateRepository
 import com.bydmate.app.domain.calculator.RangeCalculator
 import com.bydmate.app.domain.calculator.RangeEstimate
+import com.bydmate.app.domain.tracker.TrackPoint
+import com.bydmate.app.domain.tracker.TravelCourse
 import com.bydmate.app.cluster.SteeringWheelKeyService
 import com.bydmate.app.data.camera.CameraStateMonitor
 import com.bydmate.app.media.NaviRouteHolder
@@ -366,19 +369,23 @@ class AgentTools @Inject constructor(
         ))
         put(tool(
             "find_chargers",
-            "Найти электрозарядные станции рядом. В Беларуси показывает живую занятость, мощность " +
-                "и цену разъёмов из карты BETA, с резервом Malanka и OpenStreetMap. Без city ищет вокруг " +
-                "текущей позиции машины. status free/busy/unavailable; connectors_free из connectors_total; " +
-                "connector_known=false означает, что источник не сообщает типы разъёмов. " +
-                "когда он выберет, вызови navigate_to с lat и lon выбранной станции.",
+            "Найти электрозарядные станции. В Беларуси показывает живую занятость, мощность и цену. " +
+                "Без city ищет от машины. where=ahead — по пути/впереди: вдоль направления движения, " +
+                "а после navigate_to — с небольшим крюком к точке маршрута; where=around — вокруг. " +
+                "Без where движущаяся машина ищет впереди, стоящая — вокруг. distance_km по прямой; " +
+                "position ahead/behind/aside; detour_km — лишний крюк; beyond_range — дальше запаса хода. " +
+                "Когда водитель выберет станцию, вызови navigate_to с её lat и lon.",
             JSONObject()
                 .put("city", JSONObject().put("type", "string")
                     .put("description", "Город/точка поиска, если не вокруг машины"))
                 .put("radius_km", JSONObject().put("type", "integer")
-                    .put("description", "Радиус поиска в км, по умолчанию 30, максимум 100"))
+                    .put("description", "Радиус в км; ahead автоматически 30–100 по скорости, максимум 100"))
                 .put("connector", JSONObject().put("type", "string")
                     .put("enum", JSONArray(ChargeConnector.entries.map { it.label }))
-                    .put("description", "Другой тип разъёма; по умолчанию используется выбранный в настройках")),
+                    .put("description", "Другой тип разъёма; по умолчанию выбранный в настройках"))
+                .put("where", JSONObject().put("type", "string")
+                    .put("enum", JSONArray(ChargerWhere.entries.map { it.code }))
+                    .put("description", "ahead — по пути, around — вокруг")),
             emptyList(),
         ))
         put(tool(
@@ -1195,6 +1202,7 @@ class AgentTools @Inject constructor(
         val result = dispatchNavigate("Навигация", JSONObject().put("query", destination))
         if (!result.success) return JSONObject()
             .put("error", result.reason ?: "не получилось открыть Навигатор").toString()
+        routeDestination = null
         return JSONObject().put("ok", true).put("mode", "search")
             .put("note", "точку не удалось найти автоматически, открыт поиск на карте").toString()
     }
@@ -1252,6 +1260,7 @@ class AgentTools @Inject constructor(
         if (!result.success) return JSONObject().put("error",
             result.reason ?: ("адрес не найден: добавь Место \"${target.placeName}\" в BYDMate " +
                 "или сохрани точку \"${target.placeName}\" в Навигаторе")).toString()
+        routeDestination = null
         return JSONObject().put("ok", true).put("mode", "route").put("target", target.placeName)
             .put("note", "если адрес \"${target.placeName}\" сохранён в Навигаторе, " +
                 "маршрут построится по нему; запас хода не оценивался, координаты неизвестны").toString()
@@ -1261,6 +1270,7 @@ class AgentTools @Inject constructor(
         val result = dispatchNavigate("Навигация", JSONObject().put("lat", lat).put("lon", lon))
         if (!result.success) return JSONObject()
             .put("error", result.reason ?: "не получилось открыть Навигатор").toString()
+        rememberRoute(lat, lon)
         val json = JSONObject().put("ok", true).put("mode", "route").put(labelKey, label)
         rangeAssessment(lat, lon)?.let { ra ->
             ra.keys().forEach { k -> json.put(k, ra.get(k)) }
@@ -1294,6 +1304,45 @@ class AgentTools @Inject constructor(
         return json
     }
 
+    private data class RouteDestination(val lat: Double, val lon: Double, val session: Long?, val startKm: Double?)
+
+    @Volatile private var routeDestination: RouteDestination? = null
+
+    internal var recentTrackProvider: () -> List<TrackPoint> =
+        { TrackingService.recentTrack.snapshot(SystemClock.elapsedRealtime()) }
+
+    internal var sessionProvider: () -> Long? = { TrackingService.sessionStartedAt.value }
+
+    private fun rememberRoute(lat: Double, lon: Double) {
+        val startKm = locationProvider()?.let {
+            PlaceGeometry.distanceMeters(it.first, it.second, lat, lon) / 1000.0
+        }
+        routeDestination = RouteDestination(lat, lon, sessionProvider(), startKm)
+    }
+
+    private data class TripContext(
+        val course: Double? = null,
+        val speedKmh: Int? = null,
+        val destination: LatLon? = null,
+        val rangeKm: Double? = null,
+    )
+
+    private suspend fun tripContext(car: LatLon): TripContext {
+        val track = runCatchingCancellable { recentTrackProvider() }.getOrDefault(emptyList())
+        val course = TravelCourse.of(track)
+        val data = gate.vehicleSnapshot()
+        val rangeKm = data?.let {
+            runCatchingCancellable { rangeCalculator.estimate(it.soc, it.totalElecConsumption) }.getOrNull()
+        }
+        val session = sessionProvider()
+        val destination = routeDestination
+            ?.takeIf { session != null && it.session == session }
+            ?.let { LatLon(it.lat, it.lon) to it.startKm }
+            ?.takeIf { (point, startKm) -> ChargerSelection.stillApproaching(car, point, startKm, course) }
+            ?.first
+        return TripContext(course, data?.speed ?: track.lastOrNull()?.speedKmh?.roundToInt(), destination, rangeKm)
+    }
+
     private suspend fun findChargers(args: JSONObject): String {
         val city = args.optString("city").trim()
         val origin = if (city.isNotEmpty()) {
@@ -1302,57 +1351,128 @@ class AgentTools @Inject constructor(
                 ?: return """{"error":"не нашёл такую точку, уточни название"}"""
         } else locationProvider()?.let { LatLon(it.first, it.second) }
             ?: return """{"error":"нет GPS и не указан город"}"""
-        val radiusKm = args.optInt("radius_km", 30).coerceIn(1, 100)
         val connector = ChargeConnector.parse(args.optString("connector"))
             ?: runCatchingCancellable { settingsRepository.getChargeConnector() }.getOrDefault(ChargeConnector.GBT)
+        val trip = if (city.isEmpty()) tripContext(origin) else TripContext()
+        val (where, radiusKm) = chargerScope(args, city.isNotEmpty(), trip)
         val found = runCatchingCancellable {
             chargerSearchClient.find(origin.lat, origin.lon, radiusKm * 1000, connector)
         }.getOrNull()?.getOrNull()
             ?: return """{"error":"сервис поиска зарядок недоступен, попробуй позже"}"""
-        val choice = ChargerSelection.choose(origin, found.stations, connector, ChargerWhere.AROUND, null, null)
+        val choice = ChargerSelection.choose(origin, found.stations, connector, where, trip.course, trip.destination)
+        return chargersJson(found, choice, connector, radiusKm, trip)
+    }
+
+    private fun chargerScope(args: JSONObject, city: Boolean, trip: TripContext): Pair<ChargerWhere, Int> {
+        val asked = ChargerWhere.entries.firstOrNull {
+            it.code.equals(args.optString("where").trim(), ignoreCase = true)
+        }
+        val where = if (city) ChargerWhere.AROUND
+            else asked ?: ChargerSelection.defaultWhere(trip.course, trip.speedKmh)
+        val canLookAhead = where == ChargerWhere.AHEAD && (trip.course != null || trip.destination != null)
+        val radiusKm = when {
+            args.has("radius_km") -> args.optInt("radius_km", CHARGER_RADIUS_KM)
+                .coerceIn(1, MAX_CHARGER_RADIUS_KM)
+            canLookAhead -> ChargerSelection.aheadRadiusKm(trip.speedKmh)
+            else -> CHARGER_RADIUS_KM
+        }
+        return where to radiusKm
+    }
+
+    private fun chargersJson(
+        found: ChargerSearchClient.Found,
+        choice: ChargerChoice,
+        connector: ChargeConnector,
+        radiusKm: Int,
+        trip: TripContext,
+    ): String {
         val connectorKnown = found.source == ChargerSource.BETA
-        val stationStatusKnown = !connectorKnown && choice.picks.any { it.station.status != null }
+        val stationScope = !connectorKnown && choice.picks.any { it.station.status != null }
+        val actualWhere = if (choice.ahead == AheadOutcome.NO_COURSE || choice.ahead == AheadOutcome.NOT_ASKED) {
+            ChargerWhere.AROUND
+        } else ChargerWhere.AHEAD
         return JSONObject()
             .put("status_source", found.source.code)
             .put("connector", connector.label)
             .put("connector_known", connectorKnown)
-            .put("status_known", connectorKnown || stationStatusKnown)
+            .put("status_known", connectorKnown || stationScope)
+            .putOpt("status_scope", if (connectorKnown) "connector" else "station".takeIf { stationScope })
+            .put("where", actualWhere.code)
+            .putOpt("course", trip.course?.let(::compassOf))
             .put("radius_km", radiusKm)
-            .put("chargers", JSONArray().apply { choice.picks.forEach { put(chargerJson(it)) } })
-            .put("note", when {
-                choice.picks.isEmpty() -> "в радиусе $radiusKm км зарядок не найдено"
-                choice.connectorMissing -> "разъём ${connector.label} не найден; показаны станции с другими разъёмами"
-                !connectorKnown -> "источник не сообщает разъёмы, мощность и цену; расстояние указано по прямой"
-                else -> "занятость, мощность и цена относятся к разъёмам ${connector.label}; расстояние указано по прямой"
-            })
+            .put("chargers", JSONArray().apply { choice.picks.forEach { put(chargerJson(it, trip.rangeKm)) } })
+            .put("note", chargersNote(choice, connector, radiusKm, stationScope))
             .toString()
     }
 
-    private fun chargerJson(pick: ChargerPick): JSONObject = JSONObject()
-        .put("name", pick.station.name)
-        .putOpt("address", pick.station.address)
-        .putOpt("operator", pick.station.operator)
-        .put("distance_km", round1(pick.distanceKm))
-        .put("lat", pick.station.lat)
-        .put("lon", pick.station.lon)
-        .putOpt("status", (pick.summary?.status ?: pick.station.status)?.code)
-        .apply {
-            pick.summary?.let { summary ->
-                put("connectors_total", summary.total)
-                put("connectors_free", summary.free)
-                putOpt("connectors_unknown", summary.unknown.takeIf { it > 0 })
-                putOpt("max_power_kw", summary.maxPowerKw)
-                putOpt("price_per_kwh", summary.minPricePerKwh)
-                putOpt("price_max_per_kwh", summary.maxPricePerKwh?.takeIf { it != summary.minPricePerKwh })
-                putOpt("currency", summary.currency)
-            }
-            if (pick.summary == null && pick.station.connectors != null) {
-                put("connector_types", JSONArray(pick.station.connectors.map { stationConnector ->
-                    ChargeConnector.entries.firstOrNull { it.matches(stationConnector.standard) }?.label
-                        ?: stationConnector.standard
-                }.distinct()))
-            }
+    private fun chargerJson(pick: ChargerPick, rangeKm: Double?): JSONObject {
+        val station = pick.station
+        val json = JSONObject()
+            .put("name", station.name)
+            .putOpt("address", station.address)
+            .putOpt("operator", station.operator)
+            .put("distance_km", round1(pick.distanceKm))
+            .put("direction_from_car", compassOf(pick.bearingDeg))
+            .putOpt("position", pick.position?.code)
+            .putOpt("detour_km", pick.detourKm?.let { round1(it.coerceAtLeast(0.0)) })
+            .put("lat", station.lat)
+            .put("lon", station.lon)
+            .putOpt("status", (if (pick.summary != null) pick.summary.status else station.status)?.code)
+        pick.summary?.let { summary ->
+            json.put("connectors_total", summary.total)
+                .put("connectors_free", summary.free)
+                .putOpt("connectors_unknown", summary.unknown.takeIf { it > 0 })
+                .putOpt("max_power_kw", summary.maxPowerKw)
+                .putOpt("price_per_kwh", summary.minPricePerKwh)
+                .putOpt("price_max_per_kwh", summary.maxPricePerKwh?.takeIf { it != summary.minPricePerKwh })
+                .putOpt("currency", summary.currency)
         }
+        if (pick.summary == null && station.connectors != null) {
+            json.put("connector_types", JSONArray(station.connectors.map { stationConnector ->
+                ChargeConnector.entries.firstOrNull { it.matches(stationConnector.standard) }?.label
+                    ?: stationConnector.standard
+            }.distinct()))
+        }
+        station.statusAtMs?.let { at ->
+            val ageMin = ((nowMs() - at) / 60_000L).coerceAtLeast(0L)
+            json.put("status_age_min", ageMin)
+            if (ageMin > STALE_STATUS_MIN) json.put("status_stale", true)
+        }
+        if (rangeKm != null && pick.distanceKm * ROAD_FACTOR > rangeKm) json.put("beyond_range", true)
+        return json
+    }
+
+    private fun chargersNote(
+        choice: ChargerChoice,
+        connector: ChargeConnector,
+        radiusKm: Int,
+        stationScope: Boolean,
+    ): String {
+        if (choice.picks.isEmpty()) return "в радиусе $radiusKm км зарядок не найдено"
+        val parts = mutableListOf<String>()
+        when (choice.ahead) {
+            AheadOutcome.NOTHING_AHEAD ->
+                parts += "впереди станций не найдено, показаны ближайшие вокруг: скажи об этом"
+            AheadOutcome.NO_COURSE ->
+                parts += "показаны станции вокруг: направление движения неизвестно"
+            AheadOutcome.DESTINATION ->
+                parts += "станции по пути к точке маршрута, detour_km — лишний крюк по прямой"
+            AheadOutcome.CORRIDOR, AheadOutcome.NOT_ASKED -> Unit
+        }
+        if (choice.connectorMissing) {
+            parts += "станций с разъёмом ${connector.label} нет, показаны станции с другими разъёмами"
+        }
+        if (stationScope) parts += "занятость по станции целиком, про разъём машины неизвестно"
+        if (choice.picks.any { (it.summary?.unknown ?: 0) > 0 }) {
+            parts += "по части разъёмов нет данных о занятости"
+        }
+        parts += "distance_km по прямой, по дороге дальше"
+        parts += "после выбора вызови navigate_to с lat и lon"
+        return parts.joinToString("; ")
+    }
+
+    private fun compassOf(bearing: Double): String =
+        COMPASS_RU[((bearing + 22.5) / 45.0).toInt() % 8]
 
     // Same saved-place-then-geocode lookup as navigateTo, plus a straight-line distance
     // (with a road-factor fudge) against the current range estimate.
@@ -2057,6 +2177,13 @@ class AgentTools @Inject constructor(
         // Straight-line distance underestimates real road distance; this fudge factor
         // brings the estimate closer to typical highway/road routing.
         private const val ROAD_FACTOR = 1.25
+        private const val CHARGER_RADIUS_KM = 30
+        private const val MAX_CHARGER_RADIUS_KM = 100
+        private const val STALE_STATUS_MIN = 60L
+        private val COMPASS_RU = listOf(
+            "север", "северо-восток", "восток", "юго-восток",
+            "юг", "юго-запад", "запад", "северо-запад",
+        )
 
         // Any wheel below this is clearly deflated (Leopard 3 cold placard ~250 kPa).
         private const val TIRE_WARN_MIN_KPA = 210

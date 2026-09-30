@@ -10,14 +10,17 @@ import com.bydmate.app.data.local.dao.ChargeDao
 import com.bydmate.app.data.local.dao.RuleDao
 import com.bydmate.app.data.local.dao.TripDao
 import com.bydmate.app.data.remote.InsightsManager
+import com.bydmate.app.data.remote.DiParsData
 import com.bydmate.app.data.remote.OpenRouterClient
 import com.bydmate.app.data.repository.PlaceRepository
 import com.bydmate.app.data.repository.SettingsRepository
 import com.bydmate.app.domain.battery.BatteryStateRepository
 import com.bydmate.app.domain.calculator.RangeCalculator
+import com.bydmate.app.domain.tracker.TrackPoint
 import com.bydmate.app.voice.VoiceGate
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.test.runTest
@@ -26,8 +29,11 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.cos
 
 class AgentToolsChargersTest {
+
+    private var track: List<TrackPoint> = emptyList()
 
     private val gate = mockk<VoiceGate>(relaxed = true)
     private val battery = mockk<BatteryStateRepository>(relaxed = true)
@@ -62,6 +68,8 @@ class AgentToolsChargersTest {
         it.naviForegroundCheck = { true }
         it.naviVerifyAttempts = 1
         it.naviVerifyIntervalMs = 1L
+        it.recentTrackProvider = { track }
+        it.sessionProvider = { 42L }
     }
 
     private fun call(name: String, args: String) = AgentToolCall("1", name, args)
@@ -153,6 +161,76 @@ class AgentToolsChargersTest {
         assertFalse(out.has("ok"))
         assertEquals("не указано, куда ехать", out.getString("error"))
         coVerify(exactly = 0) { dispatcher.dispatch(any(), any()) }
+    }
+
+    private val kmPerDegLat = 111.195
+    private val kmPerDegLon = kmPerDegLat * cos(Math.toRadians(53.9))
+
+    private fun north(km: Double, eastKm: Double = 0.0) =
+        (53.9 + km / kmPerDegLat) to (27.56 + eastKm / kmPerDegLon)
+
+    private fun moving(speed: Int) {
+        track = (0..40).map { index ->
+            val (lat, lon) = north(-2.0 + index * 0.05)
+            TrackPoint(index * 3_000L, lat, lon, 60.0)
+        }
+        tools.locationProvider = { 53.9 to 27.56 }
+        val data = mockk<DiParsData>(relaxed = true)
+        every { data.speed } returns speed
+        every { gate.vehicleSnapshot() } returns data
+    }
+
+    private fun stationAt(name: String, northKm: Double, eastKm: Double = 0.0): ChargerStation {
+        val (lat, lon) = north(northKm, eastKm)
+        return station(name, lat, lon)
+    }
+
+    @Test fun moving_car_searches_ahead_by_default() = runTest {
+        moving(75)
+        coEvery { chargerSearchClient.find(any(), any(), any(), any()) } returns
+            Result.success(ChargerSearchClient.Found(ChargerSource.OSM, listOf(
+                stationAt("Позади", -3.0), stationAt("Впереди", 20.0, 2.0),
+            )))
+        val out = JSONObject(tools.execute(call("find_chargers", "{}")))
+        assertEquals("ahead", out.getString("where"))
+        assertEquals("север", out.getString("course"))
+        assertEquals("Впереди", out.getJSONArray("chargers").getJSONObject(0).getString("name"))
+        coVerify { chargerSearchClient.find(53.9, 27.56, 60_000, ChargeConnector.GBT) }
+    }
+
+    @Test fun around_request_keeps_stations_on_both_sides() = runTest {
+        moving(75)
+        coEvery { chargerSearchClient.find(any(), any(), any(), any()) } returns
+            Result.success(ChargerSearchClient.Found(ChargerSource.OSM, listOf(
+                stationAt("Позади", -3.0), stationAt("Впереди", 20.0),
+            )))
+        val out = JSONObject(tools.execute(call("find_chargers", """{"where":"around"}""")))
+        assertEquals("around", out.getString("where"))
+        assertEquals(2, out.getJSONArray("chargers").length())
+        assertEquals("behind", out.getJSONArray("chargers").getJSONObject(0).getString("position"))
+    }
+
+    @Test fun route_destination_filters_by_detour() = runTest {
+        moving(90)
+        coEvery { dispatcher.dispatch(any(), any()) } returns DispatchResult(true)
+        val (destinationLat, destinationLon) = north(80.0)
+        tools.execute(call("navigate_to", """{"lat":$destinationLat,"lon":$destinationLon}"""))
+        coEvery { chargerSearchClient.find(any(), any(), any(), any()) } returns
+            Result.success(ChargerSearchClient.Found(ChargerSource.OSM, listOf(
+                stationAt("Большой крюк", 30.0, 25.0), stationAt("По пути", 40.0, 1.0),
+            )))
+        val out = JSONObject(tools.execute(call("find_chargers", "{}")))
+        assertEquals("По пути", out.getJSONArray("chargers").getJSONObject(0).getString("name"))
+        assertTrue(out.getJSONArray("chargers").getJSONObject(0).has("detour_km"))
+    }
+
+    @Test fun station_beyond_estimated_range_is_marked() = runTest {
+        moving(90)
+        coEvery { range.estimate(any(), any()) } returns 30.0
+        coEvery { chargerSearchClient.find(any(), any(), any(), any()) } returns
+            Result.success(ChargerSearchClient.Found(ChargerSource.OSM, listOf(stationAt("Далеко", 40.0))))
+        val out = JSONObject(tools.execute(call("find_chargers", "{}")))
+        assertTrue(out.getJSONArray("chargers").getJSONObject(0).getBoolean("beyond_range"))
     }
 
     private fun station(name: String, lat: Double, lon: Double) =
