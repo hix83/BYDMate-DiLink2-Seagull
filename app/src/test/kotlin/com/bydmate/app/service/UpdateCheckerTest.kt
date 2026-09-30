@@ -5,7 +5,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -18,16 +17,22 @@ class UpdateCheckerTest {
         assertFalse(checker.isNewer("3.8.5", "3.8.5"))
     }
 
-    @Test fun `exact release apk wins over debug artifact`() {
+    @Test fun `field revision is newer than its base release`() {
+        assertTrue(checker.isNewer("3.8.5-1", "3.8.5"))
+        assertTrue(checker.isNewer("3.8.5-2", "3.8.5-1"))
+        assertFalse(checker.isNewer("3.8.5", "3.8.5-1"))
+    }
+
+    @Test fun `physical DiLink artifact wins for this update channel`() {
         val assets = JSONArray()
             .put(asset("BYDMate-v3.8.5-physical-debug.apk", "https://example/debug.apk"))
             .put(asset("BYDMate-v3.8.5.apk", "https://example/release.apk"))
-        assertEquals("https://example/release.apk", checker.selectReleaseApk("3.8.5", assets))
+        assertEquals("https://example/debug.apk", checker.selectReleaseApk("3.8.5", assets))
     }
 
-    @Test fun `debug-only release is rejected`() {
+    @Test fun `physical-only release is accepted`() {
         val assets = JSONArray().put(asset("BYDMate-v3.8.5-physical-debug.apk", "https://example/debug.apk"))
-        assertNull(checker.selectReleaseApk("3.8.5", assets))
+        assertEquals("https://example/debug.apk", checker.selectReleaseApk("3.8.5", assets))
     }
 
     private fun asset(name: String, url: String) =

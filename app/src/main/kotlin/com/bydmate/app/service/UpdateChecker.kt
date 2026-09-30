@@ -215,8 +215,11 @@ class UpdateChecker @Inject constructor(
     }
 
     internal fun isNewer(remote: String, local: String): Boolean {
-        val r = remote.split(".").mapNotNull { it.toIntOrNull() }
-        val l = local.split(".").mapNotNull { it.toIntOrNull() }
+        // Our field builds use X.Y.Z-N, where N is a newer revision of X.Y.Z
+        // (for example 3.8.5-1 updates 3.8.5). Numeric chunks also keep the
+        // comparison tolerant of a leading "v" and future revision suffixes.
+        val r = Regex("\\d+").findAll(remote).map { it.value.toInt() }.toList()
+        val l = Regex("\\d+").findAll(local).map { it.value.toInt() }.toList()
         for (i in 0 until maxOf(r.size, l.size)) {
             val rv = r.getOrElse(i) { 0 }
             val lv = l.getOrElse(i) { 0 }
@@ -227,14 +230,18 @@ class UpdateChecker @Inject constructor(
     }
 
     /**
-     * Select only the arm64 release artifact produced for this update channel. A release may also
-     * contain a physical-debug build; installing that over a release build can fail because its
-     * signature differs. Exact name wins, with a conservative non-debug APK fallback for old tags.
+     * Select the ARM64 artifact produced for this DiLink 2 channel. Existing public releases are
+     * physical-debug builds signed with the same debug key, so that exact artifact is preferred;
+     * a conventional release APK remains supported for future signed releases.
      */
     internal fun selectReleaseApk(version: String, assets: org.json.JSONArray): String? {
         val expected = "BYDMate-v$version.apk"
+        val expectedPhysical = "BYDMate-v$version-physical-debug.apk"
         val candidates = (0 until assets.length()).map { assets.getJSONObject(it) }
-        return candidates.firstOrNull { it.optString("name") == expected }
+        return candidates.firstOrNull { it.optString("name") == expectedPhysical }
+            ?.optString("browser_download_url")
+            ?.takeIf { it.isNotBlank() }
+            ?: candidates.firstOrNull { it.optString("name") == expected }
             ?.optString("browser_download_url")
             ?.takeIf { it.isNotBlank() }
             ?: candidates.firstOrNull {

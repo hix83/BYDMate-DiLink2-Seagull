@@ -8,6 +8,12 @@
 
 ## [Unreleased]
 
+## [3.8.5-1] - 2026-09-30
+
+### Исправления
+- Тестовая ревизия для проверки самообновления: версия `3.8.5-1` и Android `versionCode 388` распознаются как обновление поверх `3.8.5`.
+- Встроенный обновлятор принимает ARM64 `physical-debug` APK нашего DiLink 2 канала, подписанный тем же ключом, что и предыдущие публичные сборки.
+
 ## [3.8.5] - 2026-09-30
 
 ### Новое
@@ -848,7 +854,8 @@
 ### Removed
 - `fallbackToDestructiveMigration`.
 
-[Unreleased]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.5...HEAD
+[Unreleased]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.5-1...HEAD
+[3.8.5-1]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.5...v3.8.5-1
 [3.8.5]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.4...v3.8.5
 [3.8.1]: https://github.com/AndyShaman/BYDMate/compare/v3.8...v3.8.1
 [3.8]: https://github.com/AndyShaman/BYDMate/compare/v3.7...v3.8
