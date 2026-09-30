@@ -21,6 +21,7 @@ import com.bydmate.app.data.local.entity.RuleEntity
 import com.bydmate.app.data.local.entity.RuleLogEntity
 import com.bydmate.app.data.local.entity.TriggerDef
 import com.bydmate.app.data.remote.DiParsData
+import com.bydmate.app.data.telegram.withReportRuleName
 import com.bydmate.app.R
 import com.bydmate.app.data.repository.PlaceRepository
 import com.bydmate.app.service.TrackingService
@@ -509,7 +510,8 @@ class AutomationEngine @Inject constructor(
         var allSuccess = true
 
         for (action in actions) {
-            val result = actionDispatcher.dispatch(action, data)
+            val dispatchedAction = action.withReportRuleName(rule.name)
+            val result = actionDispatcher.dispatch(dispatchedAction, data)
             results.put(JSONObject().apply {
                 put("command", action.command)
                 put("displayName", action.displayName)

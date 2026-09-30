@@ -1277,4 +1277,8 @@
     <string name="tg_report_field_temps_desc">车外和车内</string>
     <string name="tg_report_field_openings_desc">车门、车窗、天窗、后备箱、引擎盖</string>
     <string name="tg_report_field_tires_desc">全部四个车轮</string>
+    <string name="dispatch_tg_report_no_bot">请在设置中连接机器人</string>
+    <string name="automation_action_tg_report">Telegram 报告</string>
+    <string name="automation_action_tg_report_add">发送 Telegram 报告</string>
+    <string name="automation_tg_report_text_label">自定义文字（可选）</string>
 </resources>

@@ -1323,4 +1323,8 @@
     <string name="tg_report_field_temps_desc">Снаружи и в салоне</string>
     <string name="tg_report_field_openings_desc">Двери, окна, люк, багажник, капот</string>
     <string name="tg_report_field_tires_desc">Все четыре колеса</string>
+    <string name="dispatch_tg_report_no_bot">Подключите бота в Настройках</string>
+    <string name="automation_action_tg_report">Отчёт в Telegram</string>
+    <string name="automation_action_tg_report_add">Отправить отчёт в Telegram</string>
+    <string name="automation_tg_report_text_label">Свой текст (опционально)</string>
 </resources>

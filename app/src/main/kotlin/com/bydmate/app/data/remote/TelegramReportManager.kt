@@ -1,8 +1,12 @@
 package com.bydmate.app.data.remote
 
 import android.content.Context
+import android.Manifest
+import android.content.pm.PackageManager
 import android.location.Location
+import android.location.LocationManager
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.bydmate.app.data.repository.SettingsRepository
 import com.bydmate.app.data.repository.TripRepository
 import com.bydmate.app.data.backup.TelegramBackupSink
@@ -11,6 +15,7 @@ import com.bydmate.app.data.telegram.ReportField
 import com.bydmate.app.data.telegram.ReportInputs
 import com.bydmate.app.data.telegram.ReportStrings
 import com.bydmate.app.data.telegram.TelegramReportBuilder
+import com.bydmate.app.service.TrackingService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.firstOrNull
 import org.json.JSONArray
@@ -30,6 +35,60 @@ class TelegramReportManager @Inject constructor(
     private val trips: TripRepository,
 ) {
     data class Pending(val id: String, val createdMs: Long, val text: String)
+
+    /** Live service fix first, then the freshest Android last-known fix. */
+    fun bestAvailableLocation(): Location? {
+        TrackingService.lastLocation.value?.let { return it }
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) !=
+            PackageManager.PERMISSION_GRANTED
+        ) return null
+        val manager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+            .mapNotNull { provider ->
+                runCatching {
+                    @Suppress("MissingPermission")
+                    manager.getLastKnownLocation(provider)
+                }.getOrNull()
+            }
+            .maxByOrNull { it.time }
+    }
+
+    /** Report action used by automations. It shares the same outbox and native map pin. */
+    suspend fun sendAutomationReport(
+        ruleName: String?,
+        fields: Set<ReportField>,
+        customText: String,
+    ): Boolean {
+        val token = settings.getString(SettingsRepository.KEY_TELEGRAM_BOT_TOKEN, "").trim()
+        val chat = settings.getString(SettingsRepository.KEY_TELEGRAM_CHAT_ID, "").trim()
+        if (token.isEmpty() || chat.toLongOrNull() == null) return false
+        val nowMs = System.currentTimeMillis()
+        val location = bestAvailableLocation()
+        val liveKm = TrackingService.tripDistanceKm.value
+        val liveStarted = TrackingService.sessionStartedAt.value
+        val strings = ReportStrings { id, args -> context.getString(id, *args) }
+        val text = TelegramReportBuilder.build(
+            header = TelegramReportBuilder.ruleHeader(ruleName),
+            customText = customText,
+            fields = fields,
+            inputs = ReportInputs(
+                data = TrackingService.lastData.value,
+                rangeKm = TrackingService.lastRangeKm.value,
+                latitude = location?.latitude,
+                longitude = location?.longitude,
+                liveTrip = if (liveKm != null && liveStarted != null) {
+                    LiveTrip(liveKm, TrackingService.tripKwhConsumed.value, liveStarted)
+                } else null,
+                lastTrip = trips.getLastTrip().firstOrNull(),
+            ),
+            lang = context.resources.configuration.locales[0].language,
+            strings = strings,
+            nowMs = nowMs,
+        ).text
+        enqueue(Pending(UUID.randomUUID().toString().take(8), nowMs, text))
+        drain("automation")
+        return true
+    }
 
     suspend fun sendPowerOffReport(
         data: DiParsData,

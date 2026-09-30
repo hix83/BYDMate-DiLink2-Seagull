@@ -1162,4 +1162,8 @@
     <string name="tg_report_field_temps_desc">Outside and in the cabin</string>
     <string name="tg_report_field_openings_desc">Doors, windows, sunroof, trunk, hood</string>
     <string name="tg_report_field_tires_desc">All four wheels</string>
+    <string name="dispatch_tg_report_no_bot">Connect the bot in Settings</string>
+    <string name="automation_action_tg_report">Telegram report</string>
+    <string name="automation_action_tg_report_add">Send a Telegram report</string>
+    <string name="automation_tg_report_text_label">Your own text (optional)</string>
 </resources>

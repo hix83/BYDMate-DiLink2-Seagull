@@ -1138,7 +1138,7 @@ class SettingsViewModel @Inject constructor(
             val nowMs = System.currentTimeMillis()
             val strings = com.bydmate.app.data.telegram.ReportStrings { id, args -> appContext.getString(id, *args) }
             val lastTrip = tripRepository.getLastTrip().firstOrNull()
-            val location = com.bydmate.app.service.TrackingService.lastLocation.value
+            val location = bestAvailableLocation()
             val liveKm = com.bydmate.app.service.TrackingService.tripDistanceKm.value
             val liveStarted = com.bydmate.app.service.TrackingService.sessionStartedAt.value
             val text = com.bydmate.app.data.telegram.TelegramReportBuilder.build(
@@ -1160,11 +1160,15 @@ class SettingsViewModel @Inject constructor(
 
             val parsedChatId = chatId.toLongOrNull()
             val result = if (parsedChatId != null) {
-                telegramBackupSink.sendMessage(token, parsedChatId, text, parseMode = "HTML", linkPreview = false).map {
-                    com.bydmate.app.data.telegram.TelegramReportBuilder.mapPoint(text)?.let { pt ->
-                        telegramBackupSink.sendLocation(token, parsedChatId, pt.latitude, pt.longitude)
-                    }
-                }
+                telegramBackupSink.sendMessage(token, parsedChatId, text, parseMode = "HTML", linkPreview = false)
+                    .fold(
+                        onSuccess = {
+                            val point = com.bydmate.app.data.telegram.TelegramReportBuilder.mapPoint(text)
+                            if (point == null) Result.success(Unit)
+                            else telegramBackupSink.sendLocation(token, parsedChatId, point.latitude, point.longitude)
+                        },
+                        onFailure = { Result.failure(it) },
+                    )
             } else {
                 telegramReportClient.send(token, chatId, text)
             }
@@ -1172,6 +1176,22 @@ class SettingsViewModel @Inject constructor(
                 it.copy(telegramStatus = appContext.getString(if (result.isSuccess) R.string.settings_telegram_sent else R.string.settings_telegram_error))
             }
         }
+    }
+
+    private fun bestAvailableLocation(): android.location.Location? {
+        com.bydmate.app.service.TrackingService.lastLocation.value?.let { return it }
+        if (ContextCompat.checkSelfPermission(appContext, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            return null
+        }
+        val manager = appContext.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+        return listOf(android.location.LocationManager.GPS_PROVIDER, android.location.LocationManager.NETWORK_PROVIDER)
+            .mapNotNull { provider ->
+                runCatching {
+                    @Suppress("MissingPermission")
+                    manager.getLastKnownLocation(provider)
+                }.getOrNull()
+            }
+            .maxByOrNull { it.time }
     }
 
     private var telegramCheckJob: Job? = null

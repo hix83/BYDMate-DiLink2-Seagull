@@ -18,6 +18,11 @@ import androidx.core.app.NotificationCompat
 import com.bydmate.app.cluster.ClusterVoiceControl
 import com.bydmate.app.data.local.entity.ActionDef
 import com.bydmate.app.data.remote.DiParsData
+import com.bydmate.app.data.remote.TelegramReportManager
+import com.bydmate.app.data.telegram.TELEGRAM_REPORT_KIND
+import com.bydmate.app.data.telegram.reportFields
+import com.bydmate.app.data.telegram.reportRuleName
+import com.bydmate.app.data.telegram.reportText
 import com.bydmate.app.data.vehicle.HelperClient
 import com.bydmate.app.data.vehicle.VehicleApi
 import com.bydmate.app.media.MediaSessionListenerService
@@ -39,6 +44,7 @@ class ActionDispatcher @Inject constructor(
     private val clusterVoiceControl: ClusterVoiceControl,
     private val audioCapture: com.bydmate.app.voice.AudioCapture,
 ) {
+    @Inject lateinit var telegramReportManager: TelegramReportManager
     companion object {
         private const val TAG = "ActionDispatcher"
         private const val CHANNEL_SILENT_ID = "bydmate_automation_silent"
@@ -263,6 +269,7 @@ class ActionDispatcher @Inject constructor(
             "cluster_projection" -> dispatchClusterProjection(action)
             "speak" -> dispatchSpeak(action)
             "agent_query" -> dispatchAgentQuery(action)
+            TELEGRAM_REPORT_KIND -> dispatchTelegramReport(action)
             else -> DispatchResult(false, "Unknown action kind: ${action.kind}")
         }
     } catch (e: Exception) {
@@ -271,6 +278,14 @@ class ActionDispatcher @Inject constructor(
         if (e is CancellationException) throw e
         Log.e(TAG, "dispatch failed for kind=${action.kind}: ${e.message}")
         DispatchResult(false, e.message ?: "Unknown error")
+    }
+
+    private suspend fun dispatchTelegramReport(action: ActionDef): DispatchResult {
+        val accepted = telegramReportManager.sendAutomationReport(
+            action.reportRuleName(), action.reportFields(), action.reportText(),
+        )
+        return if (accepted) DispatchResult(true)
+        else DispatchResult(false, context.getString(com.bydmate.app.R.string.dispatch_tg_report_no_bot))
     }
 
     // --- sentry mode (Settings.Global via helper daemon) ---

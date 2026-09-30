@@ -103,6 +103,11 @@ import com.bydmate.app.data.local.entity.PlaceEntity
 import com.bydmate.app.data.local.entity.RuleEntity
 import com.bydmate.app.data.local.entity.RuleLogEntity
 import com.bydmate.app.data.local.entity.TriggerDef
+import com.bydmate.app.data.telegram.ReportField
+import com.bydmate.app.data.telegram.TELEGRAM_REPORT_KIND
+import com.bydmate.app.data.telegram.reportFields
+import com.bydmate.app.data.telegram.reportText
+import com.bydmate.app.data.telegram.withTelegramReport
 import com.bydmate.app.ui.components.AppLaunchPickerDialog
 import com.bydmate.app.ui.components.bydSwitchColors
 import com.bydmate.app.ui.theme.*
@@ -578,6 +583,9 @@ private fun EditorDialog(
                             },
                             onAddAgentQuery = {
                                 onUpdate { copy(actions = actions + newAgentQueryAction(context)) }
+                            },
+                            onAddTelegramReport = {
+                                onUpdate { copy(actions = actions + newTelegramReportAction(context)) }
                             },
                             onAddCluster = {
                                 onUpdate { copy(actions = actions + newClusterAction(context)) }
@@ -1275,6 +1283,8 @@ private fun ActionRow(
                 SpeakActionControls(action = action, onUpdate = onUpdate, modifier = Modifier.weight(1f))
             "agent_query" ->
                 AgentQueryActionControls(action = action, onUpdate = onUpdate, modifier = Modifier.weight(1f))
+            TELEGRAM_REPORT_KIND ->
+                TelegramReportActionControls(action = action, onUpdate = onUpdate, modifier = Modifier.weight(1f))
             else -> // "param" (default)
                 ParamActionControls(action = action, onUpdate = onUpdate, modifier = Modifier.weight(1f))
         }
@@ -1312,6 +1322,78 @@ private fun ParamActionControls(
             onUpdate(ActionDef(a.command, a.localizedName(context)))
         }
     )
+}
+
+@Composable
+private fun TelegramReportActionControls(
+    action: ActionDef,
+    onUpdate: (ActionDef) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var editing by remember { mutableStateOf(false) }
+    val fields = action.reportFields()
+    val context = LocalContext.current
+    Column(
+        modifier = modifier.clickable { editing = true }.padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        Text(stringResource(R.string.automation_action_tg_report), color = TextPrimary, fontSize = 13.sp)
+        Text(
+            fields.joinToString { context.getString(it.labelRes) },
+            color = TextSecondary,
+            fontSize = 11.sp,
+            maxLines = 1,
+        )
+    }
+    if (editing) {
+        var selected by remember(fields) { mutableStateOf(fields) }
+        var customText by remember(action.payload) { mutableStateOf(action.reportText()) }
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            containerColor = CardSurface,
+            title = { Text(stringResource(R.string.automation_action_tg_report), color = TextPrimary) },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    ReportField.entries.forEach { field ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                selected = if (field in selected) selected - field else selected + field
+                            },
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(checked = field in selected, onCheckedChange = null)
+                            Column {
+                                Text(stringResource(field.labelRes), color = TextPrimary, fontSize = 13.sp)
+                                Text(stringResource(field.descRes), color = TextSecondary, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = customText,
+                        onValueChange = { if (it.length <= 300) customText = it },
+                        label = { Text(stringResource(R.string.automation_tg_report_text_label)) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = selected.isNotEmpty() || customText.isNotBlank(),
+                    onClick = {
+                        onUpdate(action.withTelegramReport(selected, customText.trim()))
+                        editing = false
+                    },
+                ) { Text(stringResource(R.string.automation_save_button)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { editing = false }) {
+                    Text(stringResource(R.string.automation_cancel_button))
+                }
+            },
+        )
+    }
 }
 
 // Delay option keys — labels are resolved at runtime via stringResource
@@ -1789,6 +1871,7 @@ private fun AddActionButton(
     onAddHotspot: () -> Unit,
     onAddSpeak: () -> Unit,
     onAddAgentQuery: () -> Unit,
+    onAddTelegramReport: () -> Unit,
     onAddCluster: () -> Unit
 ) {
     val context = LocalContext.current
@@ -1864,6 +1947,10 @@ private fun AddActionButton(
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.automation_action_agent_query), fontSize = 13.sp) },
                 onClick = { menuExpanded = false; onAddAgentQuery() }
+            )
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.automation_action_tg_report_add), fontSize = 13.sp) },
+                onClick = { menuExpanded = false; onAddTelegramReport() }
             )
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.automation_action_cluster_projection), fontSize = 13.sp) },

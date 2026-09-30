@@ -18,6 +18,9 @@ import com.bydmate.app.data.local.entity.PlaceEntity
 import com.bydmate.app.data.local.entity.RuleEntity
 import com.bydmate.app.data.local.entity.RuleLogEntity
 import com.bydmate.app.data.local.entity.TriggerDef
+import com.bydmate.app.data.telegram.ReportField
+import com.bydmate.app.data.telegram.TELEGRAM_REPORT_KIND
+import com.bydmate.app.data.telegram.withTelegramReport
 import com.bydmate.app.data.repository.PlaceRepository
 import com.bydmate.app.data.automation.ActionDispatcher
 import com.bydmate.app.data.vehicle.VehicleApi
@@ -787,6 +790,12 @@ fun newAgentQueryAction(context: Context): ActionDef = ActionDef(
     kind = "agent_query",
     payload = """{"prompt":""}"""
 )
+
+fun newTelegramReportAction(context: Context): ActionDef = ActionDef(
+    command = "",
+    displayName = context.getString(R.string.automation_action_tg_report),
+    kind = TELEGRAM_REPORT_KIND,
+).withTelegramReport(ReportField.DEFAULT, "")
 
 fun ActionDef.agentPrompt(): String = try {
     org.json.JSONObject(payload ?: "{}").optString("prompt")
