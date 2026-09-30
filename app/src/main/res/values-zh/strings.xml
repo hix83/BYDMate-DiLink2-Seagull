@@ -1169,6 +1169,8 @@
     <string name="settings_search_status_hint">未配置 Exa 密钥时，代理使用当前连接的自带搜索。如果它也不可用，代理会如实告知搜索无法使用。</string>
     <string name="settings_section_service_title">服务与数据</string>
     <string name="settings_battery_capacity_desc">用于估算续航里程和费用</string>
+    <string name="settings_charge_connector_label">充电接口</string>
+    <string name="settings_charge_connector_desc">语音助手按此接口查找充电站</string>
     <string name="settings_tariff_home_desc">家用充电 (AC) 每 1 kWh 的费用</string>
     <string name="settings_tariff_dc_desc">快充 (DC) 每 1 kWh 的费用</string>
     <string name="settings_tariff_trip_desc">行程费用使用哪种电价计算</string>

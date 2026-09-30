@@ -5,6 +5,7 @@ import com.bydmate.app.cluster.ClusterVoiceControl
 import com.bydmate.app.data.automation.ActionDispatcher
 import com.bydmate.app.data.automation.AutomationEngine
 import com.bydmate.app.data.automation.DispatchResult
+import com.bydmate.app.data.charging.ChargeConnector
 import com.bydmate.app.data.local.dao.ChargeDao
 import com.bydmate.app.data.local.dao.RuleDao
 import com.bydmate.app.data.local.dao.TripDao
@@ -45,6 +46,10 @@ class AgentToolsChargersTest {
     private val context = mockk<Context>(relaxed = true)
     private val chargerSearchClient = mockk<ChargerSearchClient>(relaxed = true)
 
+    init {
+        coEvery { settingsRepository.getChargeConnector() } returns ChargeConnector.GBT
+    }
+
     private val tools = AgentTools(
         gate, battery, range, tripDao, chargeDao, dispatcher, ruleDao, engine, places, weather,
         exa, openRouterClient, settingsRepository, contactLookup, context,
@@ -66,18 +71,18 @@ class AgentToolsChargersTest {
         tools.locationProvider = { 10.0 to 20.0 }
         coEvery { weather.geocode("Орша") } returns
             Result.success(WeatherClient.GeoPoint(54.508, 30.42, "Орша"))
-        coEvery { chargerSearchClient.search(54.508, 30.42, any()) } returns
-            Result.success(listOf(ChargerSearchClient.Charger("ЭЗС", 54.51, 30.43)))
+        coEvery { chargerSearchClient.find(54.508, 30.42, any(), ChargeConnector.GBT) } returns
+            Result.success(ChargerSearchClient.Found(ChargerSource.OSM, listOf(station("ЭЗС", 54.51, 30.43))))
         val out = JSONObject(tools.execute(call("find_chargers", """{"city":"Орша"}""")))
         assertEquals(1, out.getJSONArray("chargers").length())
-        coVerify(exactly = 0) { chargerSearchClient.search(10.0, 20.0, any()) }
+        coVerify(exactly = 0) { chargerSearchClient.find(10.0, 20.0, any(), any()) }
     }
 
     // (b) no city -> falls back to current GPS position.
     @Test fun find_chargers_without_city_uses_gps() = runTest {
         tools.locationProvider = { 53.9 to 27.56 }
-        coEvery { chargerSearchClient.search(53.9, 27.56, 30_000) } returns
-            Result.success(listOf(ChargerSearchClient.Charger("ЭЗС", 53.91, 27.57)))
+        coEvery { chargerSearchClient.find(53.9, 27.56, 30_000, ChargeConnector.GBT) } returns
+            Result.success(ChargerSearchClient.Found(ChargerSource.OSM, listOf(station("ЭЗС", 53.91, 27.57))))
         val out = JSONObject(tools.execute(call("find_chargers", "{}")))
         assertEquals(1, out.getJSONArray("chargers").length())
         coVerify(exactly = 0) { weather.geocode(any()) }
@@ -89,20 +94,22 @@ class AgentToolsChargersTest {
         // Deliberately shuffled input: the expected output order must come from sortedBy,
         // not from the fixture happening to be pre-sorted.
         val chargers = listOf(4, 1, 7, 3, 6, 2, 5).map { i ->
-            ChargerSearchClient.Charger("C$i", 0.01 * i, 0.0)
+            station("C$i", 0.01 * i, 0.0)
         }
-        coEvery { chargerSearchClient.search(0.0, 0.0, any()) } returns Result.success(chargers)
+        coEvery { chargerSearchClient.find(0.0, 0.0, any(), ChargeConnector.GBT) } returns
+            Result.success(ChargerSearchClient.Found(ChargerSource.OSM, chargers))
         val out = JSONObject(tools.execute(call("find_chargers", "{}")))
         val arr = out.getJSONArray("chargers")
-        assertEquals(5, arr.length())
+        assertEquals(7, arr.length())
         val names = (0 until arr.length()).map { arr.getJSONObject(it).getString("name") }
-        assertEquals(listOf("C1", "C2", "C3", "C4", "C5"), names)
+        assertEquals(listOf("C1", "C2", "C3", "C4", "C5", "C6", "C7"), names)
     }
 
     // (d) empty result set -> chargers array empty, with an explanatory note.
     @Test fun find_chargers_empty_result_returns_note() = runTest {
         tools.locationProvider = { 53.9 to 27.56 }
-        coEvery { chargerSearchClient.search(53.9, 27.56, any()) } returns Result.success(emptyList())
+        coEvery { chargerSearchClient.find(53.9, 27.56, any(), ChargeConnector.GBT) } returns
+            Result.success(ChargerSearchClient.Found(ChargerSource.OSM, emptyList()))
         val out = JSONObject(tools.execute(call("find_chargers", "{}")))
         assertEquals(0, out.getJSONArray("chargers").length())
         assertTrue(out.has("note"))
@@ -111,7 +118,7 @@ class AgentToolsChargersTest {
     // (e) search failure -> Russian error, not the raw exception.
     @Test fun find_chargers_search_failure_returns_russian_error() = runTest {
         tools.locationProvider = { 53.9 to 27.56 }
-        coEvery { chargerSearchClient.search(53.9, 27.56, any()) } returns
+        coEvery { chargerSearchClient.find(53.9, 27.56, any(), ChargeConnector.GBT) } returns
             Result.failure(RuntimeException("boom"))
         val out = JSONObject(tools.execute(call("find_chargers", "{}")))
         assertTrue(out.has("error"))
@@ -120,9 +127,10 @@ class AgentToolsChargersTest {
     // (f) radius_km is capped at 100 even if the LLM asks for more.
     @Test fun find_chargers_radius_km_capped_at_100() = runTest {
         tools.locationProvider = { 53.9 to 27.56 }
-        coEvery { chargerSearchClient.search(53.9, 27.56, any()) } returns Result.success(emptyList())
+        coEvery { chargerSearchClient.find(53.9, 27.56, any(), ChargeConnector.GBT) } returns
+            Result.success(ChargerSearchClient.Found(ChargerSource.OSM, emptyList()))
         tools.execute(call("find_chargers", """{"radius_km":500}"""))
-        coVerify { chargerSearchClient.search(53.9, 27.56, 100_000) }
+        coVerify { chargerSearchClient.find(53.9, 27.56, 100_000, ChargeConnector.GBT) }
     }
 
     // (g) navigate_to with lat/lon dispatches straight to the coordinate route, skipping geocode entirely.
@@ -146,4 +154,7 @@ class AgentToolsChargersTest {
         assertEquals("не указано, куда ехать", out.getString("error"))
         coVerify(exactly = 0) { dispatcher.dispatch(any(), any()) }
     }
+
+    private fun station(name: String, lat: Double, lon: Double) =
+        ChargerStation(name, null, null, lat, lon)
 }

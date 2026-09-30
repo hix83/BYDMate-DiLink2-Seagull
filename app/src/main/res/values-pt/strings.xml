@@ -998,6 +998,8 @@
     <string name="settings_voice_button_mic_header">Botão e microfone</string>
     <string name="settings_section_service_title">Serviço e dados</string>
     <string name="settings_battery_capacity_desc">Usado para estimar autonomia e custo</string>
+    <string name="settings_charge_connector_label">Conector de carregamento</string>
+    <string name="settings_charge_connector_desc">O assistente procura carregadores com este conector</string>
     <string name="settings_tariff_home_desc">Custo de 1 kWh ao carregar em casa (AC)</string>
     <string name="settings_tariff_dc_desc">Custo de 1 kWh em carregadores rápidos</string>
     <string name="settings_tariff_trip_desc">Qual tarifa usar para o custo das viagens</string>

@@ -21,6 +21,7 @@ import com.bydmate.app.data.backup.BackupManager
 import com.bydmate.app.data.backup.TelegramBackupSink
 import com.bydmate.app.data.backup.TelegramChat
 import com.bydmate.app.data.backup.TelegramSinkException
+import com.bydmate.app.data.charging.ChargeConnector
 import com.bydmate.app.data.local.EnergyDataReader
 import com.bydmate.app.data.local.HistoryImporter
 import com.bydmate.app.data.local.LocalePreferences
@@ -92,6 +93,7 @@ data class SettingsUiState(
     val units: String = SettingsRepository.DEFAULT_UNITS,
     val currency: String = SettingsRepository.DEFAULT_CURRENCY,
     val currencySymbol: String = "BYN",
+    val chargeConnector: ChargeConnector = ChargeConnector.GBT,
     val exportStatus: String? = null,
     val importStatus: String? = null,
     val appVersion: String = "0.0.0",
@@ -319,6 +321,7 @@ class SettingsViewModel @Inject constructor(
                 SettingsRepository.DEFAULT_UNITS
             )
             val currency = settingsRepository.getCurrency()
+            val chargeConnector = settingsRepository.getChargeConnector()
             val tripCostTariff = settingsRepository.getTripCostTariffKey()
             val consumptionGood = settingsRepository.getString(
                 SettingsRepository.KEY_CONSUMPTION_GOOD,
@@ -421,6 +424,7 @@ class SettingsViewModel @Inject constructor(
                     units = units,
                     currency = currency.code,
                     currencySymbol = currency.symbol,
+                    chargeConnector = chargeConnector,
                     tripCostTariff = tripCostTariff,
                     consumptionGood = consumptionGood,
                     consumptionBad = consumptionBad,
@@ -570,6 +574,11 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsRepository.setString(SettingsRepository.KEY_CURRENCY, code)
         }
+    }
+
+    fun saveChargeConnector(connector: ChargeConnector) {
+        _uiState.update { it.copy(chargeConnector = connector) }
+        viewModelScope.launch { settingsRepository.setChargeConnector(connector) }
     }
 
     /**
@@ -1126,8 +1135,39 @@ class SettingsViewModel @Inject constructor(
             settingsRepository.setString(SettingsRepository.KEY_TELEGRAM_BOT_TOKEN, token)
             settingsRepository.setString(SettingsRepository.KEY_TELEGRAM_CHAT_ID, chatId)
             _uiState.update { it.copy(telegramBotToken = token, telegramChatId = chatId, telegramStatus = appContext.getString(R.string.settings_telegram_sending)) }
-            val trip = tripRepository.getLastTrip().firstOrNull()
-            val result = telegramReportClient.send(token, chatId, TelegramReportClient.buildLastTripReport(trip))
+            val nowMs = System.currentTimeMillis()
+            val strings = com.bydmate.app.data.telegram.ReportStrings { id, args -> appContext.getString(id, *args) }
+            val lastTrip = tripRepository.getLastTrip().firstOrNull()
+            val location = com.bydmate.app.service.TrackingService.lastLocation.value
+            val liveKm = com.bydmate.app.service.TrackingService.tripDistanceKm.value
+            val liveStarted = com.bydmate.app.service.TrackingService.sessionStartedAt.value
+            val text = com.bydmate.app.data.telegram.TelegramReportBuilder.build(
+                header = com.bydmate.app.data.telegram.TelegramReportBuilder.powerOffHeader(strings),
+                customText = "",
+                fields = _uiState.value.telegramReportFields,
+                inputs = com.bydmate.app.data.telegram.ReportInputs(
+                    data = com.bydmate.app.service.TrackingService.lastData.value,
+                    rangeKm = com.bydmate.app.service.TrackingService.lastRangeKm.value,
+                    latitude = location?.latitude,
+                    longitude = location?.longitude,
+                    liveTrip = if (liveKm != null && liveStarted != null) com.bydmate.app.data.telegram.LiveTrip(liveKm, com.bydmate.app.service.TrackingService.tripKwhConsumed.value, liveStarted) else null,
+                    lastTrip = lastTrip,
+                ),
+                lang = _appLanguage.value,
+                strings = strings,
+                nowMs = nowMs,
+            ).text.let { com.bydmate.app.data.telegram.TelegramReportBuilder.fillTime(it, nowMs) }
+
+            val parsedChatId = chatId.toLongOrNull()
+            val result = if (parsedChatId != null) {
+                telegramBackupSink.sendMessage(token, parsedChatId, text, parseMode = "HTML", linkPreview = false).map {
+                    com.bydmate.app.data.telegram.TelegramReportBuilder.mapPoint(text)?.let { pt ->
+                        telegramBackupSink.sendLocation(token, parsedChatId, pt.latitude, pt.longitude)
+                    }
+                }
+            } else {
+                telegramReportClient.send(token, chatId, text)
+            }
             _uiState.update {
                 it.copy(telegramStatus = appContext.getString(if (result.isSuccess) R.string.settings_telegram_sent else R.string.settings_telegram_error))
             }

@@ -76,6 +76,9 @@ class TelegramReportManager @Inject constructor(
             val text = if (late) item.text + "\n\n<i>Записано ${time(item.createdMs)}, отправлено позже</i>" else item.text
             val chatId = chat.toLongOrNull() ?: return
             if (sink.sendMessage(token, chatId, text, parseMode = "HTML", linkPreview = false).isFailure) return
+            TelegramReportBuilder.mapPoint(text)?.let { pt ->
+                sink.sendLocation(token, chatId, pt.latitude, pt.longitude)
+            }
             queue = queue.drop(1)
             save(queue)
             Log.i(TAG, "outbox sent id=${item.id} left=${queue.size}")

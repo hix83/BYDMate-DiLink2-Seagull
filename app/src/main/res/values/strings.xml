@@ -1215,6 +1215,8 @@
     <string name="settings_search_status_hint">Без ключа Exa агент использует встроенный поиск текущего подключения. Если и он недоступен, агент честно скажет, что поиск не работает.</string>
     <string name="settings_section_service_title">Сервис и данные</string>
     <string name="settings_battery_capacity_desc">Используется для оценки запаса хода и стоимости</string>
+    <string name="settings_charge_connector_label">Разъём для зарядки</string>
+    <string name="settings_charge_connector_desc">Помощник ищет зарядки с этим разъёмом</string>
     <string name="settings_tariff_home_desc">Стоимость 1 кВт·ч при зарядке дома (AC)</string>
     <string name="settings_tariff_dc_desc">Стоимость 1 кВт·ч на быстрых зарядках</string>
     <string name="settings_tariff_trip_desc">Каким тарифом считать стоимость поездок</string>

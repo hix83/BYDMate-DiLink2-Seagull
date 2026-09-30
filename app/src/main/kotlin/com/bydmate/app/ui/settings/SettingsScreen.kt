@@ -21,6 +21,7 @@ import kotlin.math.roundToInt
 import com.bydmate.app.ui.widget.WidgetController
 import com.bydmate.app.ui.widget.WidgetPreferences
 import com.bydmate.app.data.telegram.ReportField
+import com.bydmate.app.data.charging.ChargeConnector
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
@@ -396,6 +397,14 @@ private fun BatterySection(state: SettingsUiState, viewModel: SettingsViewModel)
                 keyboardType = KeyboardType.Decimal
             )
             SettingHint(stringResource(R.string.settings_battery_capacity_desc))
+            SettingDivider()
+            SettingChipRow(
+                title = stringResource(R.string.settings_charge_connector_label),
+                description = stringResource(R.string.settings_charge_connector_desc),
+                options = ChargeConnector.entries.map { it.label },
+                selectedIndex = state.chargeConnector.ordinal,
+                onSelect = { index -> viewModel.saveChargeConnector(ChargeConnector.entries[index]) },
+            )
             SettingDivider()
             SettingsTextField(
                 label = stringResource(R.string.settings_tariff_home_label, state.currencySymbol),

@@ -15,6 +15,7 @@ import com.bydmate.app.data.automation.TriggerValidationError
 import com.bydmate.app.data.automation.ScheduleSpec
 import com.bydmate.app.data.automation.VoiceFireResult
 import com.bydmate.app.data.automation.hhmmToMinute
+import com.bydmate.app.data.charging.ChargeConnector
 import com.bydmate.app.data.local.dao.ChargeDao
 import com.bydmate.app.data.local.dao.RuleDao
 import com.bydmate.app.data.local.dao.TripDao
@@ -365,14 +366,19 @@ class AgentTools @Inject constructor(
         ))
         put(tool(
             "find_chargers",
-            "Найти электрозарядные станции рядом (данные OpenStreetMap). Без city ищет вокруг " +
-                "текущей позиции машины. Верни пользователю ближайшие варианты с расстоянием; " +
+            "Найти электрозарядные станции рядом. В Беларуси показывает живую занятость, мощность " +
+                "и цену разъёмов из карты BETA, с резервом Malanka и OpenStreetMap. Без city ищет вокруг " +
+                "текущей позиции машины. status free/busy/unavailable; connectors_free из connectors_total; " +
+                "connector_known=false означает, что источник не сообщает типы разъёмов. " +
                 "когда он выберет, вызови navigate_to с lat и lon выбранной станции.",
             JSONObject()
                 .put("city", JSONObject().put("type", "string")
                     .put("description", "Город/точка поиска, если не вокруг машины"))
                 .put("radius_km", JSONObject().put("type", "integer")
-                    .put("description", "Радиус поиска в км, по умолчанию 30, максимум 100")),
+                    .put("description", "Радиус поиска в км, по умолчанию 30, максимум 100"))
+                .put("connector", JSONObject().put("type", "string")
+                    .put("enum", JSONArray(ChargeConnector.entries.map { it.label }))
+                    .put("description", "Другой тип разъёма; по умолчанию используется выбранный в настройках")),
             emptyList(),
         ))
         put(tool(
@@ -1290,32 +1296,63 @@ class AgentTools @Inject constructor(
 
     private suspend fun findChargers(args: JSONObject): String {
         val city = args.optString("city").trim()
-        val (lat, lon) = if (city.isNotEmpty()) {
+        val origin = if (city.isNotEmpty()) {
             runCatchingCancellable { weatherClient.geocode(city) }.getOrNull()?.getOrNull()
-                ?.let { it.lat to it.lon }
+                ?.let { LatLon(it.lat, it.lon) }
                 ?: return """{"error":"не нашёл такую точку, уточни название"}"""
-        } else locationProvider() ?: return """{"error":"нет GPS и не указан город"}"""
+        } else locationProvider()?.let { LatLon(it.first, it.second) }
+            ?: return """{"error":"нет GPS и не указан город"}"""
         val radiusKm = args.optInt("radius_km", 30).coerceIn(1, 100)
-        val chargers = runCatchingCancellable {
-            chargerSearchClient.search(lat, lon, radiusKm * 1000)
+        val connector = ChargeConnector.parse(args.optString("connector"))
+            ?: runCatchingCancellable { settingsRepository.getChargeConnector() }.getOrDefault(ChargeConnector.GBT)
+        val found = runCatchingCancellable {
+            chargerSearchClient.find(origin.lat, origin.lon, radiusKm * 1000, connector)
         }.getOrNull()?.getOrNull()
             ?: return """{"error":"сервис поиска зарядок недоступен, попробуй позже"}"""
-        if (chargers.isEmpty()) return JSONObject()
-            .put("chargers", JSONArray())
-            .put("note", "в радиусе $radiusKm км зарядок в OpenStreetMap не найдено").toString()
-        val nearest = chargers
-            .sortedBy { PlaceGeometry.distanceMeters(lat, lon, it.lat, it.lon) }
-            .take(5)
-        return JSONObject().put("chargers", JSONArray().apply {
-            nearest.forEach { c ->
-                put(JSONObject()
-                    .put("name", c.name)
-                    .put("distance_km", (PlaceGeometry.distanceMeters(lat, lon, c.lat, c.lon) / 1000.0 * 10).roundToInt() / 10.0)
-                    .put("lat", c.lat)
-                    .put("lon", c.lon))
-            }
-        }).put("note", "данные OpenStreetMap, наличие и мощность не гарантированы").toString()
+        val choice = ChargerSelection.choose(origin, found.stations, connector, ChargerWhere.AROUND, null, null)
+        val connectorKnown = found.source == ChargerSource.BETA
+        val stationStatusKnown = !connectorKnown && choice.picks.any { it.station.status != null }
+        return JSONObject()
+            .put("status_source", found.source.code)
+            .put("connector", connector.label)
+            .put("connector_known", connectorKnown)
+            .put("status_known", connectorKnown || stationStatusKnown)
+            .put("radius_km", radiusKm)
+            .put("chargers", JSONArray().apply { choice.picks.forEach { put(chargerJson(it)) } })
+            .put("note", when {
+                choice.picks.isEmpty() -> "в радиусе $radiusKm км зарядок не найдено"
+                choice.connectorMissing -> "разъём ${connector.label} не найден; показаны станции с другими разъёмами"
+                !connectorKnown -> "источник не сообщает разъёмы, мощность и цену; расстояние указано по прямой"
+                else -> "занятость, мощность и цена относятся к разъёмам ${connector.label}; расстояние указано по прямой"
+            })
+            .toString()
     }
+
+    private fun chargerJson(pick: ChargerPick): JSONObject = JSONObject()
+        .put("name", pick.station.name)
+        .putOpt("address", pick.station.address)
+        .putOpt("operator", pick.station.operator)
+        .put("distance_km", round1(pick.distanceKm))
+        .put("lat", pick.station.lat)
+        .put("lon", pick.station.lon)
+        .putOpt("status", (pick.summary?.status ?: pick.station.status)?.code)
+        .apply {
+            pick.summary?.let { summary ->
+                put("connectors_total", summary.total)
+                put("connectors_free", summary.free)
+                putOpt("connectors_unknown", summary.unknown.takeIf { it > 0 })
+                putOpt("max_power_kw", summary.maxPowerKw)
+                putOpt("price_per_kwh", summary.minPricePerKwh)
+                putOpt("price_max_per_kwh", summary.maxPricePerKwh?.takeIf { it != summary.minPricePerKwh })
+                putOpt("currency", summary.currency)
+            }
+            if (pick.summary == null && pick.station.connectors != null) {
+                put("connector_types", JSONArray(pick.station.connectors.map { stationConnector ->
+                    ChargeConnector.entries.firstOrNull { it.matches(stationConnector.standard) }?.label
+                        ?: stationConnector.standard
+                }.distinct()))
+            }
+        }
 
     // Same saved-place-then-geocode lookup as navigateTo, plus a straight-line distance
     // (with a road-factor fudge) against the current range estimate.

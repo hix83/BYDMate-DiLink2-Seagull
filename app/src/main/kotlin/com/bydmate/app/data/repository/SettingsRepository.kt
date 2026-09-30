@@ -1,6 +1,7 @@
 package com.bydmate.app.data.repository
 
 import com.bydmate.app.data.backup.TgBackupConfig
+import com.bydmate.app.data.charging.ChargeConnector
 import com.bydmate.app.data.telegram.ReportField
 import com.bydmate.app.data.local.LocalePreferences
 import com.bydmate.app.data.local.dao.SettingsDao
@@ -29,6 +30,7 @@ open class SettingsRepository @Inject constructor(
         const val KEY_DC_TARIFF = "dc_tariff"
         const val KEY_UNITS = "units" // "km" or "miles"
         const val KEY_CURRENCY = "currency" // "BYN", "RUB", "USD", "EUR", "CNY"
+        const val KEY_CHARGE_CONNECTOR = "charge_connector"
         const val KEY_TRIP_COST_TARIFF = "trip_cost_tariff" // "home", "dc", or numeric
         const val KEY_CONSUMPTION_GOOD = "consumption_good_threshold"
         const val KEY_CONSUMPTION_BAD = "consumption_bad_threshold"
@@ -202,6 +204,12 @@ open class SettingsRepository @Inject constructor(
     }
 
     suspend fun getCurrencySymbol(): String = getCurrency().symbol
+
+    suspend fun getChargeConnector(): ChargeConnector =
+        ChargeConnector.fromKey(settingsDao.get(KEY_CHARGE_CONNECTOR))
+
+    suspend fun setChargeConnector(connector: ChargeConnector) =
+        setString(KEY_CHARGE_CONNECTOR, connector.key)
 
     suspend fun getTripCostTariff(): Double {
         val raw = getString(KEY_TRIP_COST_TARIFF, "home")
