@@ -1251,6 +1251,11 @@
     <string name="tg_report_trip_km_whole">%1$d 公里</string>
     <string name="tg_report_odometer">总里程 %1$,d 公里</string>
     <string name="tg_report_trip_consumption">能耗 %1$.1f kWh/100 公里</string>
+    <string name="tg_report_trip_energy">能量：%1$.2f kWh</string>
+    <string name="tg_report_trip_soc">电量：%1$s → %2$s</string>
+    <string name="tg_report_trip_avg_speed">平均速度：%1$.1f 公里/小时</string>
+    <string name="tg_report_trip_temperature">温度：%1$d °C</string>
+    <string name="tg_report_value_unknown">—</string>
     <string name="tg_report_temp_outside">车外 %1$+d°</string>
     <string name="tg_report_temp_inside">车内 %1$+d°</string>
     <string name="tg_report_open_list">未关闭：%1$s</string>

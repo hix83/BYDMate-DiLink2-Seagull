@@ -78,7 +78,7 @@ object TelegramReportBuilder {
     private const val MIN_ODOMETER_KM = 1.0
 
     private val TIME = SimpleDateFormat("HH:mm", Locale.US)
-    private val DATE = SimpleDateFormat("dd.MM", Locale.US)
+    private val FULL_DATE = SimpleDateFormat("dd.MM.yyyy", Locale.US)
     private val DATE_TIME = SimpleDateFormat("dd.MM HH:mm", Locale.US)
 
     /** «BYDMate: <rule name>», or just «BYDMate» for a rule without a name. */
@@ -94,7 +94,7 @@ object TelegramReportBuilder {
 
     fun formatTime(timeMs: Long): String = synchronized(TIME) { TIME.format(Date(timeMs)) }
 
-    private fun formatDate(timeMs: Long): String = synchronized(DATE) { DATE.format(Date(timeMs)) }
+    private fun formatFullDate(timeMs: Long): String = synchronized(FULL_DATE) { FULL_DATE.format(Date(timeMs)) }
 
     fun formatDateTime(timeMs: Long): String = synchronized(DATE_TIME) { DATE_TIME.format(Date(timeMs)) }
 
@@ -253,9 +253,40 @@ object TelegramReportBuilder {
         val last = inputs.lastTrip ?: return null
         val km = last.distanceKm?.takeIf { it > 0.0 } ?: return null
         val durationMs = last.endTs?.let { it - last.startTs }?.takeIf { it > 0 }
-        val start = text(strings, R.string.tg_report_trip_when, formatDate(last.startTs), formatTime(last.startTs))
+        val start = text(strings, R.string.tg_report_trip_when, formatFullDate(last.startTs), formatTime(last.startTs))
         val title = "🚗 ${bold(escape(text(strings, R.string.tg_report_trip_last)))} ${escape(start)}"
-        return tripLines(title, km, last.kwhPer100km?.takeIf { it > 0.0 }, durationMs, strings)
+        val distance = if (km >= WHOLE_KM_FROM) text(strings, R.string.tg_report_trip_km_whole, km.roundToInt())
+        else text(strings, R.string.tg_report_trip_km, km)
+        val took = durationMs?.let { duration(it, strings) }
+        val lines = mutableListOf(
+            title,
+            INDENT + escape(took?.let { text(strings, R.string.tg_report_trip_distance_time, distance, it) } ?: distance),
+        )
+        last.kwhConsumed?.takeIf { it > 0.0 }?.let {
+            lines += "⚡ ${escape(text(strings, R.string.tg_report_trip_energy, it))}"
+        }
+        last.kwhPer100km?.takeIf { it > 0.0 }?.let {
+            lines += "📊 ${escape(text(strings, R.string.tg_report_trip_consumption, it))}"
+        }
+        if (last.socStart != null || last.socEnd != null) {
+            val startSoc = last.socStart?.let { text(strings, R.string.tg_report_soc_value, it) }
+                ?: text(strings, R.string.tg_report_value_unknown)
+            val endSoc = last.socEnd?.let { text(strings, R.string.tg_report_soc_value, it) }
+                ?: text(strings, R.string.tg_report_value_unknown)
+            lines += "🔋 " + markup(
+                strings,
+                R.string.tg_report_trip_soc,
+                bold(escape(startSoc)),
+                bold(escape(endSoc)),
+            )
+        }
+        last.avgSpeedKmh?.takeIf { it >= 0.0 }?.let {
+            lines += escape(text(strings, R.string.tg_report_trip_avg_speed, it))
+        }
+        last.exteriorTemp?.let {
+            lines += "🌡 ${escape(text(strings, R.string.tg_report_trip_temperature, it))}"
+        }
+        return lines.joinToString("\n")
     }
 
     /** [title] (HTML) and the indented «14 км за 35 мин» / «Расход …» lines under it. */

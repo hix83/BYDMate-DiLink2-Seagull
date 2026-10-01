@@ -1133,6 +1133,11 @@
     <string name="tg_report_trip_km_whole">%1$d km</string>
     <string name="tg_report_odometer">Hodômetro %1$,d km</string>
     <string name="tg_report_trip_consumption">Consumo %1$.1f kWh/100 km</string>
+    <string name="tg_report_trip_energy">Energia: %1$.2f kWh</string>
+    <string name="tg_report_trip_soc">Carga: %1$s → %2$s</string>
+    <string name="tg_report_trip_avg_speed">Velocidade média: %1$.1f km/h</string>
+    <string name="tg_report_trip_temperature">Temperatura: %1$d °C</string>
+    <string name="tg_report_value_unknown">—</string>
     <string name="tg_report_temp_outside">lado de fora %1$+d°</string>
     <string name="tg_report_temp_inside">cabine %1$+d°</string>
     <string name="tg_report_open_list">Aberto: %1$s</string>

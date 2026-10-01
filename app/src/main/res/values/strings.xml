@@ -1297,6 +1297,11 @@
     <string name="tg_report_trip_km_whole">%1$d км</string>
     <string name="tg_report_odometer">Пробег %1$,d км</string>
     <string name="tg_report_trip_consumption">Расход %1$.1f кВт·ч/100 км</string>
+    <string name="tg_report_trip_energy">Энергия: %1$.2f кВт·ч</string>
+    <string name="tg_report_trip_soc">Заряд: %1$s → %2$s</string>
+    <string name="tg_report_trip_avg_speed">Средняя скорость: %1$.1f км/ч</string>
+    <string name="tg_report_trip_temperature">Температура: %1$d °C</string>
+    <string name="tg_report_value_unknown">—</string>
     <string name="tg_report_temp_outside">снаружи %1$+d°</string>
     <string name="tg_report_temp_inside">в салоне %1$+d°</string>
     <string name="tg_report_open_list">Открыто: %1$s</string>
