@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [3.8.5-2] - 2026-10-01
+
 ### Улучшения
 - Telegram-отчёт объединяет подробности последней поездки (энергия, расход, заряд до/после, средняя скорость и температура) со ссылкой и нативной геометкой на карте.
 
@@ -857,7 +859,8 @@
 ### Removed
 - `fallbackToDestructiveMigration`.
 
-[Unreleased]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.5-1...HEAD
+[Unreleased]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.5.2...HEAD
+[3.8.5-2]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.5.1...v3.8.5.2
 [3.8.5-1]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.5...v3.8.5-1
 [3.8.5]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.4...v3.8.5
 [3.8.1]: https://github.com/AndyShaman/BYDMate/compare/v3.8...v3.8.1
