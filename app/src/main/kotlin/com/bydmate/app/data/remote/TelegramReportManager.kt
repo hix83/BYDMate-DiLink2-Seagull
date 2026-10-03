@@ -18,6 +18,8 @@ import com.bydmate.app.data.telegram.TelegramReportBuilder
 import com.bydmate.app.service.TrackingService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.SimpleDateFormat
@@ -34,6 +36,7 @@ class TelegramReportManager @Inject constructor(
     private val settings: SettingsRepository,
     private val trips: TripRepository,
 ) {
+    private val outboxMutex = Mutex()
     data class Pending(val id: String, val createdMs: Long, val text: String)
 
     /** Live service fix first, then the freshest Android last-known fix. */
@@ -122,7 +125,9 @@ class TelegramReportManager @Inject constructor(
         drain("power_off")
     }
 
-    suspend fun drain(reason: String) {
+    suspend fun drain(reason: String) = outboxMutex.withLock { drainLocked(reason) }
+
+    private suspend fun drainLocked(reason: String) {
         val token = settings.getString(SettingsRepository.KEY_TELEGRAM_BOT_TOKEN, "").trim()
         val chat = settings.getString(SettingsRepository.KEY_TELEGRAM_CHAT_ID, "").trim()
         if (token.isEmpty() || chat.isEmpty()) return
@@ -146,7 +151,7 @@ class TelegramReportManager @Inject constructor(
 
     suspend fun pendingCount(): Int = load().size
 
-    private suspend fun enqueue(entry: Pending) {
+    private suspend fun enqueue(entry: Pending) = outboxMutex.withLock {
         val queue = (load() + entry).sortedBy { it.createdMs }.takeLast(MAX_OUTBOX)
         save(queue)
         Log.i(TAG, "outbox add id=${entry.id} size=${queue.size}")

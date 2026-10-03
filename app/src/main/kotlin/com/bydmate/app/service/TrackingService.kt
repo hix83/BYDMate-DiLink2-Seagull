@@ -105,6 +105,7 @@ class TrackingService : Service(), LocationListener {
     @Inject lateinit var sharedAdaptiveLoop: com.bydmate.app.data.loop.SharedAdaptiveLoop
     @Inject lateinit var tripRecorder: com.bydmate.app.data.trips.TripRecorder
     @Inject lateinit var helperBootstrap: com.bydmate.app.data.vehicle.HelperBootstrap
+    @Inject lateinit var remoteControlManager: com.bydmate.app.data.remote.RemoteControlManager
     @Inject lateinit var helperClient: com.bydmate.app.data.vehicle.HelperClient
     @Inject lateinit var continuousAsr: com.bydmate.app.voice.ContinuousAsr
     @Inject lateinit var asrLoadGuard: com.bydmate.app.voice.AsrLoadGuard
@@ -330,6 +331,9 @@ class TrackingService : Service(), LocationListener {
 
         private val _lastData = MutableStateFlow<DiParsData?>(null)
         val lastData: StateFlow<DiParsData?> = _lastData
+        /** Monotonic timestamp for safety-sensitive remote commands; not wall-clock time. */
+        @Volatile var lastVehicleSampleElapsedMs: Long = 0L
+            private set
 
         private val _lastRangeKm = MutableStateFlow<Double?>(null)
         val lastRangeKm: StateFlow<Double?> = _lastRangeKm
@@ -472,6 +476,7 @@ class TrackingService : Service(), LocationListener {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "onCreate: starting TrackingService")
+        lastVehicleSampleElapsedMs = 0L
         ChainLog.append(this, "TrackingService onCreate")
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification(getString(R.string.service_foreground_content_starting)))
@@ -653,6 +658,7 @@ class TrackingService : Service(), LocationListener {
         registerScreenWakeReceiver()
         registerAdbRestoreNetworkCallback()
         serviceScope.launch { telegramReportManager.drain("service_start") }
+        remoteControlManager.start(serviceScope)
 
         // Start the network monitor BEFORE polling so the first evaluate() tick
         // already has access to the latest VALIDATED edge state.
@@ -1193,6 +1199,7 @@ class TrackingService : Service(), LocationListener {
             sharedAdaptiveLoop.flow.collect { data ->
                 try {
                     _lastData.value = data
+                    lastVehicleSampleElapsedMs = android.os.SystemClock.elapsedRealtime()
                     alicePollingManager.latestData = data
                     // Cache for AutoserviceChargingDetector — avoids extra parsReader.fetch() inside runCatchUp.
                     autoserviceDetector.onSample(data)

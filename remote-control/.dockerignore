@@ -1,0 +1,4 @@
+*.db*
+__pycache__
+test_*.py
+deploy
