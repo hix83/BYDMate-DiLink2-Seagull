@@ -66,4 +66,20 @@ class CanFdDtcReadOnlyProtocolTest {
         assertEquals("B2A4B-92", summary.found.single().row.code)
         assertEquals(DtcKind.OLD, summary.found.single().row.kind)
     }
+
+    @Test fun `discovered 741 codes are active confirmed network faults`() {
+        val count = DtcParser.parseCount(hex("5901FF000002"))!!
+        val list = DtcParser.parseList(hex("59020D9AB70009C2478709"), count.format)
+        assertEquals(2, count.count)
+        assertEquals(listOf("B1AB7-00", "U0247-87"), list.rows.map { it.code })
+        assertTrue(list.rows.all { it.kind == DtcKind.NOW && it.status == 9 })
+    }
+
+    @Test fun `766 short count stays unknown but its separate list is readable`() {
+        assertNull(DtcParser.parseCount(hex("5901FF0000")))
+        val list = DtcParser.parseList(hex("59020D"), null)
+        assertFalse(list.negative)
+        assertEquals(0, list.records)
+        assertTrue(list.rows.isEmpty())
+    }
 }
