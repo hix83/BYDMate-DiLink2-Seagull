@@ -34,6 +34,7 @@ enum class FreeformLaunchResult { OK, UNAVAILABLE, FAILED }
  * BYDMateApp.onCreate — do NOT add HiddenApiBypass here.
  */
 interface HelperClient {
+    suspend fun readCanFdDiagnosticCache(): com.bydmate.app.helper.dtc.CanFdCacheRead? = null
     suspend fun daemonVersion(): Long? = null
     suspend fun registerClient(): Int? = null
     suspend fun dtcScanStart(gearDev: Int, gearFid: Int): Int? = null
@@ -129,6 +130,10 @@ interface HelperClient {
 
 @Singleton
 open class HelperClientImpl @Inject constructor() : HelperClient {
+    override suspend fun readCanFdDiagnosticCache(): com.bydmate.app.helper.dtc.CanFdCacheRead? =
+        transactParsed(HelperBinderProtocol.TX_CANFD_DIAGNOSTIC_CACHE, { }) {
+            com.bydmate.app.helper.dtc.CanFdDiagnosticCache.readReply(it)
+        }
     override suspend fun daemonVersion(): Long? =
         transact(HelperBinderProtocol.TX_GET_VERSION) { }
             ?.let { (status, value) -> if (readAccepted(status)) value.toLong() else null }

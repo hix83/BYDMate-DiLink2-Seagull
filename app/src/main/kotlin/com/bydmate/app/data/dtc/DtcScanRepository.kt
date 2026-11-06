@@ -34,7 +34,7 @@ enum class DtcScanPhase { IDLE, SCANNING }
  */
 enum class DtcScanError {
     NOT_PARK, UNAVAILABLE, NO_DIAG_SERVICE, ABORTED, DAEMON_UNREACHABLE, DAEMON_OUTDATED, STATUS_LOST,
-    ERASE_NEEDS_SCAN,
+    ERASE_NEEDS_SCAN, READ_ONLY_FIRMWARE,
 }
 
 /**
@@ -98,6 +98,7 @@ class DtcScanRepository(
     private val gearAddress: () -> FidEntry = { FidMap.entries.first { it.field == "gear" } },
     private val describer: DtcDescriber? = null,
     private val speedAddress: () -> FidEntry = { FidMap.entries.first { it.field == "speed" } },
+    private val eraseEnabled: Boolean = true,
 ) {
     private val _state = MutableStateFlow(DtcScanState())
     val state: StateFlow<DtcScanState> = _state
@@ -225,6 +226,10 @@ class DtcScanRepository(
      * The saved codes go to the log first; ignored while a scan or an erase runs.
      */
     fun startErase(addrs: IntArray) {
+        if (!eraseEnabled) {
+            _erase.value = DtcEraseState(DtcErasePhase.ENDED, error = DtcScanError.READ_ONLY_FIRMWARE)
+            return
+        }
         val list = addrs.joinToString(",") { "0x%X".format(it) }
         if (_state.value.phase == DtcScanPhase.SCANNING || erasing) {
             Log.i(TAG, "erase tap ignored addrs=$list")

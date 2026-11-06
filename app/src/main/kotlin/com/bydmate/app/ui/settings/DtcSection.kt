@@ -44,12 +44,13 @@ internal object RussianDtcLabels : DtcLabels {
 }
 
 internal fun dtcErrorText(error: DtcScanError): String = when (error) {
+    DtcScanError.READ_ONLY_FIRMWARE -> "На этой прошивке включён только режим чтения. Стирание недоступно."
     DtcScanError.NOT_PARK -> "Нужны свежие данные автомобиля и положение P."
-    DtcScanError.NO_DIAG_SERVICE -> "На этой прошивке нет штатной диагностической службы BYD."
+    DtcScanError.NO_DIAG_SERVICE -> "Не найден ожидаемый менеджер диагностики. Это не означает отсутствие всех диагностических интерфейсов прошивки."
     DtcScanError.UNAVAILABLE -> "Диагностика недоступна или занята другой программой. Закройте другие диагностические приложения."
     DtcScanError.DAEMON_UNREACHABLE, DtcScanError.DAEMON_OUTDATED -> "Нет связи с обновлённым ADB-helper. Проверьте ADB; после установки новой версии может потребоваться перезапуск helper."
     DtcScanError.ERASE_NEEDS_SCAN -> "Перед стиранием выполните новое сканирование (результат действует 10 минут)."
-    DtcScanError.ABORTED -> "Диагностика остановлена. Проверьте положение P и отсутствие другой диагностики."
+    DtcScanError.ABORTED -> "Опрос остановлен. Проверьте положение P, отсутствие OTA-обновления и другой диагностики."
     DtcScanError.STATUS_LOST -> "Связь потеряна. Результат неизвестен; выполните новое сканирование. Не повторяйте стирание вслепую."
 }
 
@@ -66,9 +67,28 @@ internal fun dtcEraseText(verdict: DtcEraseVerdict): String = when (verdict) {
 
 @HiltViewModel
 class DtcViewModel @Inject constructor(feature: DtcFeature) : ViewModel() {
+    val readOnlyFirmware = feature.readOnlyFirmware
+    val cacheReader = feature.cacheReader
     val repository = feature.repository
     val message = MutableStateFlow("")
     val sending = MutableStateFlow(false)
+    fun readCache() {
+        message.value = ""
+        viewModelScope.launch { cacheReader.refresh() }
+    }
+    fun sendCache() {
+        if (sending.value) return
+        sending.value = true
+        viewModelScope.launch {
+            try {
+                message.value = when (cacheReader.send()) {
+                    DtcSendOutcome.SENT -> "Отчёт о чтении кэша отправлен в Telegram."
+                    DtcSendOutcome.NO_BOT -> "Настройте Telegram-бота в разделе «Интеграции»."
+                    DtcSendOutcome.FAILED -> "Не удалось отправить отчёт."
+                }
+            } finally { sending.value = false }
+        }
+    }
     fun scan() { message.value = ""; repository.start() }
     fun erase(addresses: IntArray) { message.value = ""; repository.startErase(addresses) }
     fun send() {
@@ -97,16 +117,22 @@ fun DtcSection(viewModel: DtcViewModel = hiltViewModel()) {
     val sending by viewModel.sending.collectAsStateWithLifecycle()
     val busy = scan.phase == DtcScanPhase.SCANNING || erase?.phase == DtcErasePhase.ERASING
     var expanded by remember { mutableStateOf(false) }
+    var showCache by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<IntArray?>(null) }
     val summary = remember(saved) { saved?.let { DtcParser.summarize(it.results) } }
     var descriptions by remember { mutableStateOf<Map<DtcFound, DtcDescription>>(emptyMap()) }
     LaunchedEffect(saved) { descriptions = summary?.let { repo.describe(it) }.orEmpty() }
 
     Text("Диагностика ошибок", style = MaterialTheme.typography.titleLarge)
-    Text("Чтение кодов блоков автомобиля и сброс с повторной проверкой. Только на стоящей машине в P. Для стирания скорость должна достоверно читаться как 0.", style = MaterialTheme.typography.bodySmall)
+    Text(if (viewModel.readOnlyFirmware) "DiLink 2/CANFD: чтение кодов ЭБУ, только в P и при неактивном OTA. Стирание отключено. При постороннем обмене опрос останавливается."
+        else "Чтение кодов блоков автомобиля и сброс с повторной проверкой. Только на стоящей машине в P. Для стирания скорость должна достоверно читаться как 0.", style = MaterialTheme.typography.bodySmall)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = { expanded = true; viewModel.scan() }, enabled = !busy) { Text("Сканировать") }
         if (saved != null) OutlinedButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Свернуть" else "Результат") }
+    }
+    if (viewModel.readOnlyFirmware) {
+        TextButton(onClick = { showCache = !showCache }, enabled = !busy) { Text("Дополнительно: штатный кэш прошивки") }
+        if (showCache) CanFdCacheSection(viewModel)
     }
     if (busy) {
         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
@@ -129,7 +155,8 @@ fun DtcSection(viewModel: DtcViewModel = hiltViewModel()) {
         Text("Проверено: ${DtcScanRepository.formatShort(saved!!.at)} · Ответили ${summary.answered}/${summary.total} блоков")
         Text("Активные: ${summary.now} · Сохранённые: ${summary.old} · Ожидающие: ${summary.pending}")
         if (summary.answered == 0) Text("Ни один блок не ответил. Отсутствие ошибок не подтверждено.")
-        else if (summary.found.isEmpty()) Text(RussianDtcLabels.noErrors)
+        else if (summary.found.isEmpty() && summary.unreadBlocks == 0) Text("В прочитанных данных ошибок не найдено.")
+        if (summary.answered < summary.total) Text("Часть адресов не ответила: блок может отсутствовать или быть недоступен. Это не подтверждает отсутствие ошибок в нём.", style = MaterialTheme.typography.bodySmall)
         if (summary.unreadBlocks > 0) Text(RussianDtcLabels.unread(summary.unreadBlocks))
         val groups = remember(saved) { DtcParser.groups(summary.found) }
         for (group in groups) {
@@ -144,7 +171,7 @@ fun DtcSection(viewModel: DtcViewModel = hiltViewModel()) {
                             if (description.level == DtcDescLevel.SIMILAR) Text(RussianDtcLabels.similarNote, style = MaterialTheme.typography.bodySmall)
                         }
                     }
-                    OutlinedButton(enabled = !busy && !uncertain, onClick = {
+                    if (!viewModel.readOnlyFirmware) OutlinedButton(enabled = !busy && !uncertain, onClick = {
                         val addrs = DtcErasePlan.eligibleBlock(saved, group.addrs.first(), System.currentTimeMillis())
                         if (addrs == null || addrs.isEmpty()) viewModel.message.value = "Перед стиранием выполните новое сканирование." else confirm = addrs
                     }) { Text("Стереть в этом блоке") }
@@ -153,7 +180,7 @@ fun DtcSection(viewModel: DtcViewModel = hiltViewModel()) {
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = viewModel::send, enabled = !busy && !sending && !uncertain) { Text(if (sending) "Отправка…" else "В Telegram") }
-            if (summary.found.isNotEmpty()) OutlinedButton(enabled = !busy && !uncertain, onClick = {
+            if (!viewModel.readOnlyFirmware && summary.found.isNotEmpty()) OutlinedButton(enabled = !busy && !uncertain, onClick = {
                 val addrs = DtcErasePlan.eligible(saved, System.currentTimeMillis())
                 if (addrs == null || addrs.isEmpty()) viewModel.message.value = "Перед стиранием выполните новое сканирование." else confirm = addrs
             }) { Text("Стереть все") }
@@ -168,5 +195,30 @@ fun DtcSection(viewModel: DtcViewModel = hiltViewModel()) {
             confirmButton = { TextButton(onClick = { confirm = null; viewModel.erase(addresses) }) { Text("Стереть и проверить") } },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Отмена") } })
     }
+    Spacer(Modifier.height(16.dp))
+}
+
+@Composable
+private fun CanFdCacheSection(viewModel: DtcViewModel) {
+    val state by viewModel.cacheReader.state.collectAsStateWithLifecycle()
+    val sending by viewModel.sending.collectAsStateWithLifecycle()
+    val message by viewModel.message.collectAsStateWithLifecycle()
+    Text("Диагностика DiLink 2 — только чтение", style = MaterialTheme.typography.titleLarge)
+    Text("Профиль CANFD / MT6765. Читаются сохранённые данные штатной прошивки, не выполняется полный опрос ЭБУ. Стирание отключено.", style = MaterialTheme.typography.bodySmall)
+    OutlinedButton(enabled = !state.busy, onClick = viewModel::readCache) {
+        Text(if (state.busy) "Чтение…" else "Прочитать штатный кэш")
+    }
+    if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+    state.result?.let { result ->
+        Text("Прочитано: ${DtcScanRepository.formatShort(state.at)}")
+        Text(CanFdDiagnosticReader.description(result.status))
+        if (result.status == com.bydmate.app.helper.dtc.CacheReadStatus.UNDECODED) {
+            Text("Получено ${result.bytes.size} байт. Расшифрованных кодов пока нет.")
+        }
+        OutlinedButton(enabled = !state.busy && !sending, onClick = viewModel::sendCache) {
+            Text(if (sending) "Отправка…" else "Отчёт в Telegram")
+        }
+    }
+    if (message.isNotEmpty()) Text(message)
     Spacer(Modifier.height(16.dp))
 }

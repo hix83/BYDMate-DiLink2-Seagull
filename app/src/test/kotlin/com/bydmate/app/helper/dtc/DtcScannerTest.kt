@@ -64,12 +64,13 @@ class DtcScannerTest {
         var guard: () -> String? = { DtcWire.GUARD_BASELINE }
         var gear: () -> Int? = { 1 }
         var speed: () -> Int? = { 0 }
+        var legacyGate: (() -> String?)? = null
         val tasks = mutableListOf<Runnable>()
         var inline = true
 
         val scanner by lazy {
             DtcScanner(device, clock, { guard() }, runner = { if (inline) it.run() else tasks += it },
-                readSpeed = { speed() })
+                readSpeed = { speed() }, legacyReadGate = legacyGate)
         }
 
         fun run(): DtcScanStatus { scanner.start { gear() }; return scanner.status() }
@@ -104,6 +105,47 @@ class DtcScannerTest {
     private fun isClear(p: ByteArray) = (p[4].toInt() and 0xFF) == 0x14
     private fun addrOf(p: ByteArray) = ((p[1].toInt() and 0xFF) shl 8) or (p[2].toInt() and 0xFF)
     private fun DtcScanStatus.of(addr: Int) = results.first { it.addr == addr }
+
+    @Test fun `inspected legacy read works without manager when OTA is idle`() {
+        val w = world()
+        w.guard = { null }
+        w.legacyGate = { null }
+        assertEquals(DtcWire.STATE_DONE, w.run().state)
+        assertTrue(w.device.sent.isNotEmpty())
+        assertTrue(w.device.sent.none(::isClear))
+    }
+
+    @Test fun `legacy scan stops when OTA becomes busy before next request`() {
+        val w = world()
+        w.guard = { null }
+        w.legacyGate = { if (w.device.sent.size < 2) null else "ota_not_idle state=1" }
+        val status = w.run()
+        assertEquals(DtcWire.STATE_ABORTED, status.state)
+        assertTrue(status.reason.startsWith("ota_not_idle"))
+        assertEquals(2, w.device.sent.size)
+        assertEquals(1, w.device.unregisterCalls)
+    }
+
+    @Test fun `legacy erase is refused before registration or send`() {
+        val w = world()
+        w.guard = { null }
+        w.legacyGate = { null }
+        val status = w.erase(0x7E0)
+        assertEquals(DtcWire.STATE_UNAVAILABLE, status.state)
+        assertEquals("read_only_firmware", status.reason)
+        assertEquals(0, w.device.sent.size)
+        assertEquals(0, w.device.registerCalls)
+    }
+
+    @Test fun `legacy scan stops on unrelated diagnostic traffic`() {
+        val w = world { request -> listOf(DtcFixtures.frame(0x7E7, hex("62012300"))) }
+        w.guard = { null }
+        w.legacyGate = { null }
+        val status = w.run()
+        assertEquals(DtcWire.STATE_ABORTED, status.state)
+        assertTrue(status.reason, status.reason.startsWith("foreign"))
+        assertEquals(1, w.device.sent.size)
+    }
 
     @Test fun `a full L3 scan ends DONE with the outcome of every address`() {
         val w = world()

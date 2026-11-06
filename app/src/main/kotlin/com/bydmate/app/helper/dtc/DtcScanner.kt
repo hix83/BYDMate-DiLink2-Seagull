@@ -34,6 +34,8 @@ class DtcScanner(
     private val readGuard: () -> String?,
     private val runner: (Runnable) -> Unit = { Thread(it, "dtc-scan").start() },
     private val readSpeed: () -> Int? = { null },
+    /** Explicit inspected old-firmware policy; null retains the original manager guard. Never permits erase. */
+    private val legacyReadGate: (() -> String?)? = null,
 ) {
     /** Ends the run from anywhere inside it with its terminal state. */
     private class Stop(val state: Int, val reason: String) : RuntimeException(reason)
@@ -376,7 +378,7 @@ class DtcScanner(
         val gear = run.gear()
         val speed = if (run.erase) readSpeed() else null
         gate(run, guard, gear, speed, at)?.let { throw it }
-        if (run.erase) quiet(run, at)
+        if (run.erase || legacyReadGate != null) quiet(run, at)
 
         val rc = device.send(payload)
         run.sent++
@@ -398,7 +400,7 @@ class DtcScanner(
                 if (match is DtcMatch.Multiframe) " raw=${hex(frame, 0, frame.size)}" else ""
         )
         clock.sleep(SETTLE_MS)
-        if (run.erase) quiet(run, at) else device.drain()
+        if (run.erase || legacyReadGate != null) quiet(run, at) else device.drain()
         return match
     }
 
@@ -411,11 +413,11 @@ class DtcScanner(
             when (val m = match(frame)) {
                 DtcMatch.NotMine -> other(run, frame, at)
                 DtcMatch.Pending -> {
-                    if (run.erase) run.ours += frame
+                    if (run.erase || legacyReadGate != null) run.ours += frame
                     log("pending $at ms_left=${deadline - clock.nowMs()}")
                 }
                 else -> {
-                    if (run.erase) run.ours += frame
+                    if (run.erase || legacyReadGate != null) run.ours += frame
                     return m to frame
                 }
             }
@@ -424,7 +426,7 @@ class DtcScanner(
 
     /** A frame that is not the answer awaited: skipped in a scan; in an erase only a duplicate of ours is. */
     private fun other(run: Run, frame: ByteArray, at: String) {
-        if (run.erase && run.ours.none { sameFrame(it, frame) }) {
+        if ((run.erase || legacyReadGate != null) && run.ours.none { sameFrame(it, frame) }) {
             run.foreign++
             log("foreign ${head(frame)} uds=${udsHex(frame)}")
             throw stop(DtcWire.STATE_ABORTED, "foreign " + head(frame).substringBefore(' '), at)
@@ -454,13 +456,20 @@ class DtcScanner(
     }
 
     /** Why the next request (or, with [at] null, the run itself) must not go out; null when it may. */
-    private fun gate(run: Run, guard: String?, gear: Int?, speed: Int?, at: String?): Stop? = when {
-        at == null && guard == null -> stop(DtcWire.STATE_UNAVAILABLE, "guard_absent", at)
+    private fun gate(run: Run, guard: String?, gear: Int?, speed: Int?, at: String?): Stop? {
+        if (legacyReadGate != null) {
+            if (run.erase) return stop(DtcWire.STATE_UNAVAILABLE, "read_only_firmware", at)
+            if (guard != null) return stop(DtcWire.STATE_ABORTED, "unexpected_diag_manager", at)
+            legacyReadGate.invoke()?.let { return stop(DtcWire.STATE_ABORTED, it, at) }
+        }
+        return when {
+        legacyReadGate == null && at == null && guard == null -> stop(DtcWire.STATE_UNAVAILABLE, "guard_absent", at)
         clock.nowMs() - run.startedMs >= run.budgetMs -> stop(DtcWire.STATE_ABORTED, "budget", at)
-        guard != DtcWire.GUARD_BASELINE -> stop(DtcWire.STATE_ABORTED, "diag_busy prop=$guard", at)
+        legacyReadGate == null && guard != DtcWire.GUARD_BASELINE -> stop(DtcWire.STATE_ABORTED, "diag_busy prop=$guard", at)
         gear != GEAR_PARK -> stop(DtcWire.STATE_ABORTED, "not_park gear=$gear", at)
         run.erase && speed != 0 -> stop(DtcWire.STATE_ABORTED, "speed kmh=$speed", at)
         else -> null
+        }
     }
 
     private fun publish(state: Int, reason: String) = synchronized(lock) {

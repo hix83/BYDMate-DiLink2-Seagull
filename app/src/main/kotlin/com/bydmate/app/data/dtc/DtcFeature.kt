@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.bydmate.app.helper.dtc.readDtcSystemProperty
 
 data class DtcLiveSample(val gear: Int?, val elapsedMs: Long)
 
@@ -23,6 +24,8 @@ class DtcFeature @Inject constructor(
     settings: SettingsRepository,
     sink: TelegramBackupSink,
 ) {
+    val readOnlyFirmware = com.bydmate.app.helper.dtc.CanFdDiagnosticCache.supports(::readDtcSystemProperty)
+    val cacheReader = CanFdDiagnosticReader(helper, settings, sink)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val repository = DtcScanRepository(
         helper, context.getSharedPreferences(DtcScanRepository.PREFS_NAME, Context.MODE_PRIVATE),
@@ -35,6 +38,7 @@ class DtcFeature @Inject constructor(
         serviceRunning = { TrackingService.isRunning.value },
         elapsedNow = SystemClock::elapsedRealtime,
         wallNow = System::currentTimeMillis,
+        eraseEnabled = !readOnlyFirmware,
         describer = DtcDescriber(
             open = { context.assets.open("dtc/$it").reader(Charsets.UTF_8) },
             autoType = { CarAutoType.read(helper) },

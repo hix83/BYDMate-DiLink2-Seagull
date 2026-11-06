@@ -187,7 +187,7 @@ object DtcWire {
      * echo this request or carry no UDS bytes.
      */
     fun match(raw: ByteArray, addr: Int, service: Int, sub: Int): DtcMatch {
-        if (raw.size < HEADER) return DtcMatch.NotMine
+        if (raw.size < HEADER || raw[0] != 0x0A.toByte()) return DtcMatch.NotMine
         if (replyId(raw) != addr + REPLY_ID_OFFSET) return DtcMatch.NotMine
         if (u(raw, 4) > 1) return DtcMatch.Multiframe(raw.copyOf())
         val len = u(raw, 3)

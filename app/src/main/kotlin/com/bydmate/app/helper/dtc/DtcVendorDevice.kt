@@ -16,11 +16,18 @@ internal object DtcDaemon {
 
     /** Reads the speed (km/h, null = unknown) at the address the app resolved; set by the erase verb. */
     @Volatile var speed: (() -> Int?)? = null
+    @Volatile var otaState: (() -> Int?)? = null
 
     val scanner: DtcScanner by lazy {
+        val legacy = CanFdDiagnosticCache.supports(::readDtcSystemProperty)
         DtcScanner(
-            DtcVendorDevice(), SystemDtcClock, { readDtcSystemProperty(GUARD_PROPERTY) },
+            if (legacy) CanFdReadOnlyDevice(DtcVendorDevice(requireConfirmed = true)) else DtcVendorDevice(),
+            SystemDtcClock, { readDtcSystemProperty(GUARD_PROPERTY) },
             readSpeed = { speed?.invoke() },
+            legacyReadGate = if (legacy) ({
+                if (!CanFdDiagnosticCache.supports(::readDtcSystemProperty)) "firmware_changed"
+                else CanFdDtcReadOnlyProtocol.gate(otaState?.invoke(), readDtcSystemProperty("persist.sys.byd.otaupdate"))
+            }) else null,
         )
     }
 }
@@ -36,7 +43,7 @@ internal object SystemDtcClock : DtcClock {
  * The listener is a real AbsBYDAutoMqttListener subclass (the firmware refuses a Proxy), lives
  * for one scan and only queues the frames; the scan thread reads them.
  */
-internal class DtcVendorDevice : DtcDevice {
+internal class DtcVendorDevice(private val requireConfirmed: Boolean = false) : DtcDevice {
     private val frames = LinkedBlockingQueue<ByteArray>(QUEUE_CAPACITY)
     @Volatile private var device: Any? = null
     @Volatile private var listener: Listener? = null
@@ -65,7 +72,11 @@ internal class DtcVendorDevice : DtcDevice {
             findDtcListenerMethod(dev, l, "registerListener", withFeatureIds = true).invoke(dev, l, intArrayOf(RX))
             val confirmed = confirmDtcRegistration(dev, RX)
             Log.i(TAG, "register rx=0x%08X map=%s".format(RX, confirmed))
-            if (confirmed == DTC_NOT_IN_FEATURE_MAP) "register_failed not_in_feature_map" else null
+            when {
+                confirmed == DTC_NOT_IN_FEATURE_MAP -> "register_failed not_in_feature_map"
+                requireConfirmed && confirmed != "ok" -> "register_failed not_confirmed"
+                else -> null
+            }
         }.getOrElse { e ->
             Log.w(TAG, "register failed ${describe(e)}")
             reasonFor(e)

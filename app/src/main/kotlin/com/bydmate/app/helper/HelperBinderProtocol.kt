@@ -45,6 +45,8 @@ import android.os.IBinder
  * status/value carry the raw autoservice transact result (see HelperDaemon).
  */
 object HelperBinderProtocol {
+    /** No args. Fixed cached GET only; does not initiate an ECU scan. */
+    val TX_CANFD_DIAGNOSTIC_CACHE = IBinder.FIRST_CALL_TRANSACTION + 64
     const val ACTION_BINDER = "com.bydmate.app.helper.BINDER"
     const val RECEIVER_CLASS = "com.bydmate.app.helper.HelperBinderReceiver"
     const val EXTRA_BUNDLE = "helper"

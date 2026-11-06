@@ -43,6 +43,14 @@ import org.robolectric.shadows.ShadowLog
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29])
 class DtcScanRepositoryTest {
+    @Test fun `read-only firmware refuses erase even without a scan or live sample`() = runTest {
+        val r = DtcScanRepository(helper, prefs, settings, sink, backgroundScope,
+            liveSample = { null }, serviceRunning = { false }, elapsedNow = { 0 }, wallNow = { wall },
+            eraseEnabled = false)
+        r.startErase(intArrayOf(0x712))
+        assertEquals(DtcScanError.READ_ONLY_FIRMWARE, r.erase.value?.error)
+        coVerify(exactly = 0) { helper.dtcEraseStart(any(), any(), any(), any(), any()) }
+    }
 
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val prefs = context.getSharedPreferences("dtc_scan", Context.MODE_PRIVATE)

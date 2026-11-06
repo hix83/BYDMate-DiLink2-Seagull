@@ -8,6 +8,17 @@
 
 ## [Unreleased]
 
+## [3.9.2] - 2026-11-06
+
+### Новое
+- Чтение DTC на проверенной старой прошивке DiLink 2 CANFD через найденный штатный формат MQTT. Физический проход завершён: ответили 6 из 18 известных адресов, прочитан сохранённый код.
+- Дополнительное чтение штатного диагностического кэша с различением пустых, неизвестных и недоступных данных.
+
+### Изменения
+- На проверенной CANFD-прошивке стирание отключено во всех слоях. Опрос требует P, неактивного OTA и свободного диагностического канала.
+- Неполный результат не считается подтверждением исправности автомобиля; число ответивших блоков показывается отдельно.
+- Версия 3.9.2/code392, прежняя подпись APK. 3015 тестов, 0 ошибок, 2 пропущены. Ограничения и порядок обновления: [релиз 3.9.2](docs/releases/v3.9.2.md).
+
 ## [3.9.1] - 2026-11-06
 
 ### Новое
@@ -897,7 +908,8 @@
 ### Removed
 - `fallbackToDestructiveMigration`.
 
-[Unreleased]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.1...HEAD
+[Unreleased]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.2...HEAD
+[3.9.2]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.1...v3.9.2
 [3.9.1]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.0...v3.9.1
 [3.9.0]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.5.2...v3.9.0
 [3.8.5-2]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.5.1...v3.8.5.2

@@ -17,6 +17,7 @@ import java.util.concurrent.ConcurrentHashMap
 import android.os.IBinder
 import android.os.Looper
 import android.os.Parcel
+import com.bydmate.app.helper.dtc.readDtcSystemProperty
 import java.io.RandomAccessFile
 import java.nio.channels.FileChannel
 import java.nio.channels.FileLock
@@ -59,11 +60,16 @@ private fun handleDtcScanTransact(code: Int, data: Parcel, reply: Parcel?, svc: 
             HelperBinderProtocol.TX_DTC_SCAN_START -> {
                 val gearDev = data.readInt()
                 val gearFid = data.readInt()
+                com.bydmate.app.helper.dtc.DtcDaemon.otaState = { readDtcGear(svc, autoIface, 1032, 1128267824) }
                 val status = com.bydmate.app.helper.dtc.DtcDaemon.scanner.start { readDtcGear(svc, autoIface, gearDev, gearFid) }
                 android.util.Log.i("DtcScan", "start request gear=$gearDev/$gearFid reply=$status")
                 reply?.writeInt(status)
             }
             HelperBinderProtocol.TX_DTC_ERASE_START -> {
+                if (com.bydmate.app.helper.dtc.CanFdDiagnosticCache.supports(::readDtcSystemProperty)) {
+                    reply?.writeInt(-1) // The inspected DiLink 2 profile is strictly read-only.
+                    return true
+                }
                 val gearDev = data.readInt()
                 val gearFid = data.readInt()
                 val speedDev = data.readInt()
@@ -174,6 +180,17 @@ fun main(args: Array<String>) {
             data.enforceInterface(HelperBinderProtocol.DESCRIPTOR)
 
             return when (code) {
+                HelperBinderProtocol.TX_CANFD_DIAGNOSTIC_CACHE -> {
+                    val cache = com.bydmate.app.helper.dtc.CanFdDiagnosticCache
+                    val result = cache.read(
+                        cache.supports(::readDtcSystemProperty),
+                        readDtcGear(svc, autoIface, 1011, 555745336),
+                    ) {
+                        cache.readNative(svc, autoIface)
+                    }
+                    reply?.let { cache.writeReply(it, result) }
+                    true
+                }
                 HelperBinderProtocol.TX_PING -> runCatching {
                     reply?.writeInt(0)
                     true
