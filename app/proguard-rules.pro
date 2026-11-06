@@ -42,6 +42,11 @@
 # The helper package runs under app_process via reflection (the bydmate_helper
 # binder daemon: HelperDaemon.main entry + HelperBinderProtocol transaction codes).
 -keep class com.bydmate.app.helper.** { *; }
+# Compile-only firmware types used by the diagnostic listener. Real implementations are in
+# the head unit framework; they deliberately do not exist in a normal Android APK.
+-dontwarn android.hardware.bydauto.**
+-dontwarn android.hardware.IBYDAutoEvent
+-dontwarn android.hardware.IBYDAutoListener
 
 # HiddenApiBypass reflects into hidden framework APIs (ServiceManager) at runtime.
 -keep class org.lsposed.hiddenapibypass.** { *; }

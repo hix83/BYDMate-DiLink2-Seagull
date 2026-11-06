@@ -15,6 +15,22 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class VehicleApiDilink2CompressorTest {
+    @Test fun `DiLink 2 temperature uses verified native setpoint instead of DiPlus`() = runTest {
+        val adb = mockk<AdbOnDeviceClient>()
+        val nativeApi = VehicleApiImpl(
+            parsReader = mockk(relaxed = true), autoservice = mockk(relaxed = true),
+            helper = mockk(relaxed = true), allowlist = WriteAllowlist.EMPTY,
+            writeLogDao = mockk(relaxed = true), seatStore = mockk(relaxed = true),
+            diPlusControl = diPlus, adbOnDevice = adb,
+        )
+        for (confirmed in listOf(true, false)) {
+            coEvery { adb.setClimateTemperature(33) } returns confirmed
+            val result = nativeApi.dispatchForPlatform("设置温度33", VehiclePlatform.DILINK2)
+            assertTrue(if (confirmed) result.isSuccess else result.isFailure)
+        }
+        coVerify(exactly = 2) { adb.setClimateTemperature(33) }
+        coVerify(exactly = 0) { diPlus.sendCommand(any()) }
+    }
     private val helper = mockk<HelperClient>()
     private val diPlus = mockk<DiParsControlClient>()
     private val api = VehicleApiImpl(

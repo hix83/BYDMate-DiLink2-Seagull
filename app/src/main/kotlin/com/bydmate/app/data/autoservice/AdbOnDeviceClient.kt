@@ -58,6 +58,15 @@ interface AdbOnDeviceClient {
      * Narrow hardcoded write: only levels 1..7 and the proven blower FID. */
     suspend fun setClimateFanLevel(level: Int): Boolean = false
 
+    /** Normal climate power, not ventilation-only or automatic A/C. */
+    suspend fun setClimatePower(enabled: Boolean): Boolean = false
+
+    /** Single cabin setpoint in Celsius with live readback (DiLink 2 Seagull). */
+    suspend fun setClimateTemperature(celsius: Int): Boolean = false
+
+    /** Air distribution, separate from the front-defrost F program. */
+    suspend fun setClimateWindMode(mode: Int): Boolean = false
+
     /**
      * Spawns the helper daemon under shell uid via app_process, using the app's
      * own signed base.apk as CLASSPATH (no dex push — integrity comes from the
@@ -70,7 +79,7 @@ interface AdbOnDeviceClient {
      * protocol exec path (the public exec() write barrier only permits autoservice
      * GETs and would reject this).
      */
-    suspend fun spawnHelper(): Boolean
+    suspend fun spawnHelper(token: String): Boolean
 
     /**
      * Kills any running helper daemon (by exact nice-name) under shell uid, so a fresh
@@ -297,45 +306,63 @@ class AdbOnDeviceClientImpl @Inject constructor(
         }
     }
 
-    override suspend fun setClimateFanLevel(level: Int): Boolean = withContext(Dispatchers.IO) {
+    override suspend fun setClimateFanLevel(level: Int): Boolean {
         require(level in CLIMATE_FAN_MIN..CLIMATE_FAN_MAX) {
             "setClimateFanLevel: level must be $CLIMATE_FAN_MIN..$CLIMATE_FAN_MAX"
         }
+        return writeClimateInt(CLIMATE_FAN_WRITE_FID, CLIMATE_FAN_READ_FID, level)
+    }
+
+    override suspend fun setClimatePower(enabled: Boolean): Boolean =
+        writeClimateInt(501219364, 1077936144, if (enabled) 1 else 0)
+
+    override suspend fun setClimateTemperature(celsius: Int): Boolean {
+        require(celsius in 16..33) { "Climate temperature must be 16..33 Celsius" }
+        return writeClimateInt(501219368, 1077936168, celsius)
+    }
+
+    override suspend fun setClimateWindMode(mode: Int): Boolean {
+        require(mode in 1..7) { "Climate wind mode must be 1..7" }
+        return writeClimateInt(501219336, 1077936152, mode)
+    }
+
+    // Private: callers cannot provide arbitrary device IDs, FIDs or shell commands.
+    private suspend fun writeClimateInt(writeFid: Int, readFid: Int, value: Int): Boolean = withContext(Dispatchers.IO) {
         val p = protocol ?: run {
             val connected = connect()
             if (connected.isFailure) return@withContext false
             protocol ?: return@withContext false
         }
         try {
-            // Deliberately bypass public exec()'s read-only barrier through this one
-            // narrow API. Live-validated on the connected DiLink 2: tx=6 returns 1
-            // and read FID 1077936156 changes to the requested stage.
+            // Narrow climate API; public exec() remains read-only. Acceptance is
+            // insufficient: always require a matching live setpoint/state readback.
             val write = p.exec(
-                "service call autoservice 6 i32 $CLIMATE_DEV i32 $CLIMATE_FAN_WRITE_FID i32 $level"
+                "service call autoservice 6 i32 $CLIMATE_DEV i32 $writeFid i32 $value"
             ) ?: return@withContext false
             if (!write.contains("Parcel(00000001")) {
-                Log.w(TAG, "blower write rejected: $write")
+                Log.w(TAG, "climate write rejected: $write")
                 return@withContext false
             }
             repeat(5) {
                 val read = p.exec(
-                    "service call autoservice 5 i32 $CLIMATE_DEV i32 $CLIMATE_FAN_READ_FID"
+                    "service call autoservice 5 i32 $CLIMATE_DEV i32 $readFid"
                 )
-                if (parseAutoserviceReadInt(read) == level) {
-                    Log.i(TAG, "DiLink 2 blower level confirmed: $level")
+                if (parseAutoserviceReadInt(read) == value) {
+                    Log.i(TAG, "DiLink 2 climate readback confirmed: fid=$readFid value=$value")
                     return@withContext true
                 }
                 Thread.sleep(150L)
             }
-            Log.w(TAG, "blower write accepted but readback did not reach $level")
+            Log.w(TAG, "climate write accepted but readback did not reach $value")
             false
         } catch (e: Exception) {
-            Log.w(TAG, "setClimateFanLevel failed: ${e.message}")
+            Log.w(TAG, "climate write failed: ${e.message}")
             false
         }
     }
 
-    override suspend fun spawnHelper(): Boolean = withContext(Dispatchers.IO) {
+    override suspend fun spawnHelper(token: String): Boolean = withContext(Dispatchers.IO) {
+        require(token.matches(Regex("^[A-Za-z0-9]{32}$"))) { "spawnHelper: refused token" }
         val p = protocol ?: run {
             val r = connect()
             if (r.isFailure) return@withContext false
@@ -352,10 +379,11 @@ class AdbOnDeviceClientImpl @Inject constructor(
             // (empty log, no registration). Mirrors the proven BYD EV Pro / aps_diplus
             // spawn recipe; see reference_autoservice_write_channel.md.
             val spawnCmd =
-                "CLASSPATH=${ctx.packageCodePath} setsid app_process /system/bin " +
+                ": >$HELPER_LOG_PATH; CLASSPATH=${ctx.packageCodePath} setsid app_process /system/bin " +
                 "--nice-name=$HELPER_PROCESS_NAME com.bydmate.app.helper.HelperDaemon " +
-                "${android.os.Process.myUid()} </dev/null >$HELPER_LOG_PATH 2>&1 & " +
-                "for i in 1 2 3; do service list 2>/dev/null | grep -q $HELPER_PROCESS_NAME && break; sleep 1; done"
+                "${android.os.Process.myUid()} $token </dev/null >$HELPER_LOG_PATH 2>&1 & " +
+                "for i in 1 2 3; do { service list 2>/dev/null | grep -q $HELPER_PROCESS_NAME || " +
+                "grep -q READY $HELPER_LOG_PATH 2>/dev/null; } && break; sleep 1; done"
             // exec() returns null only on a dead/disconnected socket (AdbProtocolClient.exec) — an
             // honest false here matters: HelperBootstrap.ensureRunningLocked() persists the spawned
             // versionCode ONLY after a dispatch that actually succeeded, and bails otherwise.

@@ -1,0 +1,2 @@
+# The upstream parser fixture deliberately contains trailing spaces to test normalization.
+app/src/test/resources/dtc/texts.tsv whitespace=-blank-at-eol

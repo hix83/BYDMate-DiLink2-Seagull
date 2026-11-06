@@ -163,6 +163,12 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- Shell-UID helper handoff. Authenticated by a per-spawn token and Binder descriptor. -->
+        <receiver android:name=".helper.HelperBinderReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.bydmate.app.helper.BINDER" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

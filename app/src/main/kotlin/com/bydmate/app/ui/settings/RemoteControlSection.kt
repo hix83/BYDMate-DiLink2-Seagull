@@ -32,7 +32,7 @@ class RemoteControlViewModel @Inject constructor(private val manager: RemoteCont
 fun RemoteControlSection(viewModel: RemoteControlViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     Text("Удалённое управление", style = MaterialTheme.typography.headlineSmall)
-    Text("Кабинет: byd.slk-soft.ru\nКлимат, положение на карте и сезонные правила. Регистрация по приглашению администратора.")
+    Text("Кабинет: byd.slk-soft.ru\nКлимат, положение на карте и сохранённые пресеты. Регистрация по приглашению администратора.")
     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         Text("Разрешить удалённое управление", modifier = Modifier.weight(1f))
         Switch(checked = state.enabled, onCheckedChange = viewModel::enabled)
@@ -54,5 +54,5 @@ fun RemoteControlSection(viewModel: RemoteControlViewModel = hiltViewModel()) {
         Image(bitmap.asImageBitmap(), "QR для привязки автомобиля", Modifier.size(300.dp).background(Color.White))
         Text("Отсканируйте камерой телефона и войдите в кабинет. Не передавайте QR другим людям.")
     }
-    Text("Задания выполняются только при готовности ADB, на стоящей машине в P. Выключенный автомобиль не запускается. Результат отправляется в Telegram из настроек BYDMate.", style = MaterialTheme.typography.bodySmall)
+    Text("Климатические настройки применяются без ожидания P при готовности ADB и свежих данных автомобиля. Подогревы сидений в этой комплектации отсутствуют и не управляются. Выключенный автомобиль не запускается. Результат отправляется в Telegram из настроек BYDMate.", style = MaterialTheme.typography.bodySmall)
 }

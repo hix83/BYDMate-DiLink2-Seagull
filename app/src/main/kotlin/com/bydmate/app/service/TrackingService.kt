@@ -563,6 +563,13 @@ class TrackingService : Service(), LocationListener {
             Log.d(TAG, "Initial cachedLastTripAvg on service start: $cachedLastTripAvg")
         }
 
+        com.bydmate.app.helper.HelperBinderHolder.installOnAccepted {
+            serviceScope.launch {
+                helperBootstrap.clearLastSpawnFailure()
+                Log.i(TAG, "Helper broadcast accepted; client registration rc=${helperClient.registerClient()}")
+            }
+        }
+
         // Bootstrap the native helper daemon BEFORE polling so the first write
         // (automation rule, Alice command) reaches a live bydmate_helper binder service.
         // Fire-and-forget — reads via autoservice don't depend on the daemon, so
@@ -1114,6 +1121,7 @@ class TrackingService : Service(), LocationListener {
         // (WorkManager restarts the service into the same process, reusing the
         // singleton). Cancelling here left confirm-action callbacks dead until
         // process death.
+        com.bydmate.app.helper.HelperBinderHolder.installOnAccepted(null)
         serviceScope.cancel()
 
         // Remove GPS listener to prevent leak

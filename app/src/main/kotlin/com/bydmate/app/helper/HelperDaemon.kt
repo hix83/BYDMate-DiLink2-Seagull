@@ -2,6 +2,12 @@
 package com.bydmate.app.helper
 
 import android.content.Context
+import android.content.ComponentName
+import android.content.Intent
+import android.os.Bundle
+import com.bydmate.app.BuildConfig
+import java.lang.reflect.InvocationTargetException
+import java.lang.reflect.UndeclaredThrowableException
 import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -47,6 +53,52 @@ internal fun acquireSingleOwnerLock(path: String): Pair<FileChannel, FileLock>? 
     }
 }
 
+private fun handleDtcScanTransact(code: Int, data: Parcel, reply: Parcel?, svc: IBinder, autoIface: String): Boolean {
+    runCatching {
+        when (code) {
+            HelperBinderProtocol.TX_DTC_SCAN_START -> {
+                val gearDev = data.readInt()
+                val gearFid = data.readInt()
+                val status = com.bydmate.app.helper.dtc.DtcDaemon.scanner.start { readDtcGear(svc, autoIface, gearDev, gearFid) }
+                android.util.Log.i("DtcScan", "start request gear=$gearDev/$gearFid reply=$status")
+                reply?.writeInt(status)
+            }
+            HelperBinderProtocol.TX_DTC_ERASE_START -> {
+                val gearDev = data.readInt()
+                val gearFid = data.readInt()
+                val speedDev = data.readInt()
+                val speedFid = data.readInt()
+                val addrs = data.createIntArray() ?: IntArray(0)
+                com.bydmate.app.helper.dtc.DtcDaemon.speed = { readDtcSpeed(svc, autoIface, speedDev, speedFid) }
+                val status = com.bydmate.app.helper.dtc.DtcDaemon.scanner.startErase(addrs) { readDtcGear(svc, autoIface, gearDev, gearFid) }
+                android.util.Log.i(
+                    "DtcScan",
+                    "erase request gear=$gearDev/$gearFid speed=$speedDev/$speedFid " +
+                        "addrs=${addrs.joinToString(",") { "0x%X".format(it) }} reply=$status",
+                )
+                reply?.writeInt(status)
+            }
+            else -> reply?.let { com.bydmate.app.helper.dtc.writeDtcScanStatus(it, com.bydmate.app.helper.dtc.DtcDaemon.scanner.status()) }
+        }
+    }.onFailure { e ->
+        android.util.Log.w("DtcScan", "tx=$code failed: ${e.javaClass.simpleName}")
+        reply?.setDataSize(0)
+        reply?.writeInt(-1)
+    }
+    return true
+}
+
+private fun readDtcGear(svc: IBinder, autoIface: String, dev: Int, fid: Int): Int? =
+    autoserviceTransact(svc, autoIface, 5, dev, fid, 0, writeValue = false)
+        .takeIf { (status, _) -> status == 0 }?.second
+
+/** Speed in whole km/h rounded away from 0 (any movement reads >= 1); null when unreadable or a sentinel. */
+private fun readDtcSpeed(svc: IBinder, autoIface: String, dev: Int, fid: Int): Int? =
+    autoserviceTransact(svc, autoIface, 7, dev, fid, 0, writeValue = false)
+        .takeIf { (status, _) -> status == 0 }
+        ?.let { (_, bits) -> com.bydmate.app.data.autoservice.SentinelDecoder.parseFloatFromShellInt(bits) }
+        ?.let { kotlin.math.ceil(kotlin.math.abs(it)).toInt() }
+
 /**
  * Shell-uid binder daemon entry point. Spawned by the app via:
  *   CLASSPATH=<apk> app_process /system/bin \
@@ -71,6 +123,8 @@ fun main(args: Array<String>) {
         exitProcess(2)
     }
 
+    val spawnToken = spawnTokenFrom(args)
+
     // Step 1: single-owner lock — prevents duplicate daemons.
     val lockPair = acquireSingleOwnerLock(LOCK_PATH)
     if (lockPair == null) {
@@ -89,6 +143,7 @@ fun main(args: Array<String>) {
     @Suppress("DEPRECATION")
     Looper.prepareMainLooper()
     val systemContext: Context? = acquireSystemContext()
+    com.bydmate.app.helper.dtc.DtcDaemon.context = systemContext
 
     // Step 2: resolve autoservice Binder.
     val smCls = Class.forName("android.os.ServiceManager")
@@ -111,6 +166,10 @@ fun main(args: Array<String>) {
         override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
             // Uid gate first — only our app may call.
             if (Binder.getCallingUid() != expectedUid) return false
+
+            // Descriptor lookup carries no interface token. Handle it before enforceInterface,
+            // otherwise the authenticated broadcast binder is rejected as descriptor_mismatch.
+            if (isHelperDescriptorRequest(code)) return super.onTransact(code, data, reply, flags)
 
             data.enforceInterface(HelperBinderProtocol.DESCRIPTOR)
 
@@ -359,24 +418,57 @@ fun main(args: Array<String>) {
                     true
                 }.getOrElse { reply?.writeInt(-1); reply?.writeInt(0); true }
 
+                HelperBinderProtocol.TX_DTC_SCAN_START,
+                HelperBinderProtocol.TX_DTC_SCAN_STATUS,
+                HelperBinderProtocol.TX_DTC_ERASE_START -> handleDtcScanTransact(code, data, reply, svc, autoIface)
+
+                HelperBinderProtocol.TX_GET_VERSION -> {
+                    reply?.writeInt(0); reply?.writeInt(BuildConfig.VERSION_CODE); true
+                }
+                HelperBinderProtocol.TX_REGISTER_CLIENT -> runCatching {
+                    registerHelperClient(data.readStrongBinder()); reply?.writeInt(0); true
+                }.getOrElse { reply?.writeInt(-1); true }
+
                 else -> super.onTransact(code, data, reply, flags)
             }
         }
     }
     helperBinder.attachInterface(null, HelperBinderProtocol.DESCRIPTOR)
 
-    // Step 4: register the stub with ServiceManager.
+    // Step 4: register the stub with ServiceManager, or publish it by broadcast when the
+    // firmware refuses the registration to the shell domain (#64 / #148).
+    var transport = "servicemanager"
     try {
         smCls.getMethod("addService", String::class.java, IBinder::class.java)
             .invoke(null, HelperBinderProtocol.SERVICE_NAME, helperBinder)
     } catch (e: Exception) {
-        System.err.println("ERR: addService ${e.message}")
-        // exitProcess so the OS releases the file lock we hold; a bare return would
-        // leave a hung lock-holding daemon and block every future spawn.
-        exitProcess(4)
+        System.err.println("ERR: addService ${describeBootstrapFailure(e)}")
+        when (decideRegistrationFallback(systemContext != null, spawnToken != null)) {
+            RegistrationFallback.EXIT_NO_CONTEXT -> {
+                System.err.println("ERR: broadcast fallback unavailable: no system context")
+                // exitProcess so the OS releases the file lock we hold; a bare return would
+                // leave a hung lock-holding daemon and block every future spawn.
+                exitProcess(4)
+            }
+            RegistrationFallback.EXIT_NO_TOKEN -> {
+                System.err.println("ERR: broadcast fallback unavailable: no spawn token")
+                exitProcess(4)
+            }
+            RegistrationFallback.BROADCAST -> try {
+                publishBinderByBroadcast(systemContext!!, helperBinder, spawnToken!!)
+                transport = HelperBinderHolder.TRANSPORT_BROADCAST
+                // One delivery is not enough: the app process is recreated (service restart, task
+                // removed, memory pressure) far more often than the daemon, and a recreated process
+                // has no binder. Keep announcing until a client registers (#64/#148).
+                scheduleReannounce(systemContext!!, helperBinder, spawnToken!!)
+            } catch (be: Exception) {
+                System.err.println("ERR: broadcast ${describeBootstrapFailure(be)}")
+                exitProcess(5)
+            }
+        }
     }
 
-    System.out.println("READY pid=${android.os.Process.myPid()}")
+    System.out.println("READY via=$transport pid=${android.os.Process.myPid()}")
     System.out.flush()
 
     // Keepalive: Looper.loop() blocks this thread indefinitely so main() never returns
@@ -1206,3 +1298,161 @@ private fun launchFreeform(packageName: String, displayId: Int, left: Int, top: 
         log = { msg, t -> android.util.Log.w("bydmate_helper", msg, t) },
     ) { Thread.sleep(it) }
 }
+
+private const val FAILURE_STACK_FRAMES = 4
+private const val MAX_CAUSE_HOPS = 4
+private const val REANNOUNCE_INTERVAL_MS = 10_000L
+
+internal fun isHelperDescriptorRequest(code: Int): Boolean = code == IBinder.INTERFACE_TRANSACTION
+
+internal fun describeBootstrapFailure(t: Throwable, frames: Int = FAILURE_STACK_FRAMES): String {
+    val root = unwrapReflectionCause(t)
+    return buildString {
+        append(root.javaClass.name)
+        append(": ")
+        append(root.message ?: "(no message)")
+        if (root !== t) append(" [wrapped in ${t.javaClass.simpleName}]")
+        root.stackTrace.take(frames).forEach { append("\n  at $it") }
+    }
+}
+
+/** Peels InvocationTargetException / UndeclaredThrowableException down to the real throwable. */
+private fun unwrapReflectionCause(t: Throwable): Throwable {
+    var current = t
+    var hops = 0
+    while (hops < MAX_CAUSE_HOPS &&
+        (current is InvocationTargetException || current is UndeclaredThrowableException)
+    ) {
+        current = current.cause ?: break
+        hops++
+    }
+    return current
+}
+
+
+internal fun spawnTokenFrom(args: Array<String>): String? =
+    args.getOrNull(1)?.takeIf { it.isNotBlank() }
+
+/** What to do after ServiceManager.addService refused us — see [decideRegistrationFallback]. */
+internal enum class RegistrationFallback {
+    /** No system Context: nothing can send a broadcast from this process. */
+    EXIT_NO_CONTEXT,
+    /** No spawn token: the app could not authenticate the intent, so we must not send one. */
+    EXIT_NO_TOKEN,
+    /** Hand the Binder to the app in a broadcast. */
+    BROADCAST,
+}
+
+/**
+ * The whole decision after a refused addService, split out from the Android-dependent sender
+ * so it can be unit-tested. Both preconditions are hard: without a Context there is no
+ * sendBroadcast, and without a token the app has no way to tell our intent from a forged one
+ * (the receiver is exported — the sender is the shell uid, not our own process).
+ */
+internal fun decideRegistrationFallback(hasSystemContext: Boolean, hasToken: Boolean): RegistrationFallback =
+    when {
+        !hasSystemContext -> RegistrationFallback.EXIT_NO_CONTEXT
+        !hasToken -> RegistrationFallback.EXIT_NO_TOKEN
+        else -> RegistrationFallback.BROADCAST
+    }
+
+/**
+ * Hands [binder] to the app in an explicit broadcast — the D+ (aps_diplus) recipe for firmwares
+ * where the shell domain may transact with autoservice but may not register a service name.
+ *
+ * Explicit component + package so no other app can receive it, and on the FIRST delivery
+ * FLAG_INCLUDE_STOPPED_PACKAGES so a force-stopped app (the state right after an update) is still
+ * woken. The token lets the app authenticate the sender; version and pid are diagnostics for the dump.
+ */
+private fun publishBinderByBroadcast(
+    ctx: Context,
+    binder: IBinder,
+    token: String,
+    includeStopped: Boolean = true,
+) {
+    val extras = Bundle().apply {
+        putBinder(HelperBinderProtocol.KEY_BINDER, binder)
+        putString(HelperBinderProtocol.KEY_TOKEN, token)
+        putLong(HelperBinderProtocol.KEY_VERSION, BuildConfig.VERSION_CODE.toLong())
+        putInt(HelperBinderProtocol.KEY_PID, android.os.Process.myPid())
+    }
+    val intent = Intent(HelperBinderProtocol.ACTION_BINDER)
+        .setComponent(ComponentName(HelperBinderProtocol.APP_PACKAGE, HelperBinderProtocol.RECEIVER_CLASS))
+        .setPackage(HelperBinderProtocol.APP_PACKAGE)
+        .addFlags(binderIntentFlags(includeStopped))
+        .putExtra(HelperBinderProtocol.EXTRA_BUNDLE, extras)
+    ctx.sendBroadcast(intent)
+}
+
+/** App-side binder registered over TX_REGISTER_CLIENT; null while no app process holds ours. */
+@Volatile private var helperClientBinder: IBinder? = null
+
+/** Re-announce broadcasts sent since the last client registration — diagnostic counter only. */
+@Volatile private var reannounceCount = 0
+
+/** Re-arms the re-announce timer once the registered client dies; null on the addService path. */
+@Volatile private var resumeReannounce: (() -> Unit)? = null
+
+/**
+ * Whether the binder still has to be announced. Only the broadcast transport needs it at all —
+ * on firmwares where addService worked the app re-looks the daemon up by name after any restart.
+ */
+internal fun shouldReannounce(transport: String, clientRegistered: Boolean): Boolean =
+    transport == HelperBinderHolder.TRANSPORT_BROADCAST && !clientRegistered
+
+/**
+ * Repeats [publishBinderByBroadcast] every [REANNOUNCE_INTERVAL_MS] while no app process has
+ * registered. Uncapped on purpose: one explicit intent per 10 s costs nothing, and it is
+ * self-limiting — a running app registers within seconds of receiving the binder.
+ */
+private fun scheduleReannounce(ctx: Context, binder: IBinder, token: String) {
+    val handler = android.os.Handler(Looper.getMainLooper())
+    val tick = object : Runnable {
+        override fun run() {
+            if (!shouldReannounce(HelperBinderHolder.TRANSPORT_BROADCAST, helperClientBinder != null)) return
+            // includeStopped = false: the user force-stopping the app kills our client binder and
+            // resumes this timer — waking the app back up would override that stop. A process
+            // restarted normally still receives it.
+            runCatching { publishBinderByBroadcast(ctx, binder, token, includeStopped = false) }
+            reannounceCount++
+            println("REANNOUNCE n=$reannounceCount")
+            System.out.flush()
+            handler.postDelayed(this, REANNOUNCE_INTERVAL_MS)
+        }
+    }
+    resumeReannounce = {
+        // removeCallbacks first: a register+die in the same interval could otherwise leave two
+        // chains posting in parallel.
+        handler.removeCallbacks(tick)
+        handler.postDelayed(tick, REANNOUNCE_INTERVAL_MS)
+    }
+    handler.postDelayed(tick, REANNOUNCE_INTERVAL_MS)
+}
+
+/** TX_REGISTER_CLIENT body: remember the app's binder and stop announcing until it dies. */
+private fun registerHelperClient(client: IBinder?) {
+    if (client == null) return
+    helperClientBinder = client
+    reannounceCount = 0
+    println("CLIENT registered")
+    System.out.flush()
+    runCatching {
+        client.linkToDeath({
+            helperClientBinder = null
+            println("CLIENT died")
+            System.out.flush()
+            resumeReannounce?.invoke()
+        }, 0)
+    }.onFailure {
+        // Already dead between the transact and the link — that is no client at all.
+        helperClientBinder = null
+        resumeReannounce?.invoke()
+    }
+}
+
+/**
+ * Intent flags of the binder broadcast. Only the first delivery may wake a stopped package: every
+ * re-announce that did so would restart an app the user just force-stopped.
+ */
+internal fun binderIntentFlags(includeStopped: Boolean): Int =
+    if (includeStopped) Intent.FLAG_INCLUDE_STOPPED_PACKAGES else 0

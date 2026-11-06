@@ -139,12 +139,14 @@ class AdbOnDeviceClientTest {
         val client = newClient(fake)
 
         client.connect()
-        val result = client.spawnHelper()
+        val result = client.spawnHelper("0123456789abcdef0123456789abcdef")
 
         assertTrue("spawnHelper should return true on successful dispatch", result)
         assertEquals("exactly one exec call should be made", 1, fake.execCalls.size)
 
         val cmd = fake.execCalls.single()
+        assertTrue(cmd.contains("0123456789abcdef0123456789abcdef"))
+        assertTrue(cmd.contains("grep -q READY"))
         assertTrue("must contain setsid", cmd.contains("setsid"))
         assertTrue("must contain CLASSPATH=", cmd.contains("CLASSPATH="))
         assertTrue("must contain app_process", cmd.contains("app_process"))
@@ -200,7 +202,7 @@ class AdbOnDeviceClientTest {
         val client = newClient(fake)
 
         client.connect()
-        val result = client.spawnHelper()
+        val result = client.spawnHelper("0123456789abcdef0123456789abcdef")
 
         assertFalse("spawnHelper must not claim success when exec returns null", result)
     }
@@ -290,5 +292,48 @@ class AdbOnDeviceClientTest {
             )
         )
         assertNull(AdbOnDeviceClientImpl.parseAutoserviceReadInt("bad output"))
+    }
+
+    @Test fun `climate temperature writes main setpoint and verifies it`() = runTest {
+        val write = "service call autoservice 6 i32 1000 i32 501219368 i32 33"
+        val read = "service call autoservice 5 i32 1000 i32 1077936168"
+        val fake = FakeProtocol(execResponses = mapOf(write to "Result: Parcel(00000001)",
+            read to "Result: Parcel(00000000 00000021)"))
+        assertTrue(newClient(fake).setClimateTemperature(33))
+        assertEquals(listOf(write, read), fake.execCalls)
+    }
+
+    @Test fun `climate power is independent of compressor and ventilation`() = runTest {
+        for (enabled in listOf(true, false)) {
+            val value = if (enabled) 1 else 0
+            val write = "service call autoservice 6 i32 1000 i32 501219364 i32 $value"
+            val read = "service call autoservice 5 i32 1000 i32 1077936144"
+            val fake = FakeProtocol(execResponses = mapOf(write to "Result: Parcel(00000001)",
+                read to "Result: Parcel(00000000 0000000$value)"))
+            assertTrue(newClient(fake).setClimatePower(enabled))
+            assertEquals(listOf(write, read), fake.execCalls)
+        }
+    }
+
+    @Test fun `climate temperature rejects unconfirmed readback`() = runTest {
+        val fake = FakeProtocol(execResponses = mapOf(
+            "service call autoservice 6 i32 1000 i32 501219368 i32 33" to "Result: Parcel(00000001)",
+            "service call autoservice 5 i32 1000 i32 1077936168" to "Result: Parcel(00000000 00000019)"))
+        assertFalse(newClient(fake).setClimateTemperature(33))
+    }
+
+    @Test fun `climate temperature rejects invalid value without dispatch`() = runTest {
+        val fake = FakeProtocol()
+        try { newClient(fake).setClimateTemperature(34); fail("Expected range rejection") }
+        catch (_: IllegalArgumentException) { }
+        assertTrue(fake.execCalls.isEmpty())
+    }
+    @Test fun `air direction uses separate FID and verifies requested mode`() = runTest {
+        val write = "service call autoservice 6 i32 1000 i32 501219336 i32 5"
+        val read = "service call autoservice 5 i32 1000 i32 1077936152"
+        val fake = FakeProtocol(execResponses = mapOf(write to "Result: Parcel(00000001)",
+            read to "Result: Parcel(00000000 00000005)"))
+        assertTrue(newClient(fake).setClimateWindMode(5))
+        assertEquals(listOf(write, read), fake.execCalls)
     }
 }

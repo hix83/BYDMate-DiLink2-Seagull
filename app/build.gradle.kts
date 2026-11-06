@@ -30,8 +30,8 @@ android {
         // on DiLink Android 12 (requestLegacyExternalStorage works).
         // targetSdk 30+ would break listFiles() on /storage/emulated/0/energydata/
         targetSdk = 29
-        versionCode = 390
-        versionName = "3.9.0"
+        versionCode = 391
+        versionName = "3.9.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -171,6 +171,9 @@ ksp {
 }
 
 dependencies {
+    // Firmware supplies these classes; never package the compile-time mirror in the APK.
+    compileOnly(project(":bydauto-stubs"))
+    testImplementation(project(":bydauto-stubs"))
     // Compose
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.material3:material3")

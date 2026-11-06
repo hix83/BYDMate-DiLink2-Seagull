@@ -45,6 +45,19 @@ import android.os.IBinder
  * status/value carry the raw autoservice transact result (see HelperDaemon).
  */
 object HelperBinderProtocol {
+    const val ACTION_BINDER = "com.bydmate.app.helper.BINDER"
+    const val RECEIVER_CLASS = "com.bydmate.app.helper.HelperBinderReceiver"
+    const val EXTRA_BUNDLE = "helper"
+    const val KEY_BINDER = "binder"
+    const val KEY_TOKEN = "token"
+    const val KEY_VERSION = "version"
+    const val KEY_PID = "pid"
+    val TX_GET_VERSION = IBinder.FIRST_CALL_TRANSACTION + 28
+    val TX_REGISTER_CLIENT = IBinder.FIRST_CALL_TRANSACTION + 43
+    // Same wire slots as upstream. Jobs run outside the Binder thread and serialize in DtcScanner.
+    val TX_DTC_SCAN_START = IBinder.FIRST_CALL_TRANSACTION + 61
+    val TX_DTC_SCAN_STATUS = IBinder.FIRST_CALL_TRANSACTION + 62
+    val TX_DTC_ERASE_START = IBinder.FIRST_CALL_TRANSACTION + 63
     const val SERVICE_NAME = "bydmate_helper"
     const val PROCESS_NAME = "bydmate_helper"   // app_process --nice-name + ps lookup
     const val DESCRIPTOR = "com.bydmate.app.helper.IHelper"

@@ -1459,6 +1459,7 @@ private fun LearnButtonDialog(
 
 @Composable
 private fun ServiceSection(state: SettingsUiState, viewModel: SettingsViewModel) {
+    DtcSection()
     val context = LocalContext.current
     val adbRestore = remember {
         EntryPointAccessors.fromApplication(

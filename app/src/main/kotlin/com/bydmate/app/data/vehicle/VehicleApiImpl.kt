@@ -69,6 +69,14 @@ class VehicleApiImpl @Inject constructor(
         platform: VehiclePlatform,
     ): Result<Unit> {
         if (diPlusControl != null && platform == VehiclePlatform.DILINK2) {
+            CommandTranslator.resolve(commandString).singleOrNull()
+                ?.takeIf { it.actionName == "ac_temp_main" }
+                ?.let { temperature ->
+                    val changed = adbOnDevice?.setClimateTemperature(temperature.value) ?: false
+                    return if (changed) Result.success(Unit) else Result.failure(
+                        VehicleWriteError.HelperUnreachable(commandString, "DiLink 2 temperature write/readback failed")
+                    )
+                }
             // Di+ 1.3.8 returns success=true for unknown blower phrases but performs
             // no action. Route this one proven command through on-device ADB directly
             // to autoservice and require live FanLevel readback before reporting OK.

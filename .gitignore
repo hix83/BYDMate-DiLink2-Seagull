@@ -6,6 +6,8 @@
 .DS_Store
 /build
 /app/build
+/bydauto-stubs/build
+/.kotlin/
 /helper-dex/build
 /captures
 .externalNativeBuild

@@ -135,14 +135,17 @@ class RemoteControlManager @Inject constructor(
         _state.value = _state.value.copy(linked = linked, qrUrl = if (linked) "" else _state.value.qrUrl,
             message = if (linked) "На связи · ${if (adbReady) "ADB готов" else "ожидание ADB и данных автомобиля"}" else "Ожидание привязки в кабинете")
         val cmd = response.optJSONObject("command") ?: return
-        // Remote climate cannot disrupt a moving car, or operate on unknown vehicle state.
-        if (!adbReady || !RemoteClimateCommands.canExecute(snapshot?.speed, snapshot?.gear, sampleAge(), TrackingService.vehicleDataConnected.value)) {
-            _state.value = _state.value.copy(message = "Задание ожидает остановки машины в P")
+        // Temperature and fan may change without P, but never with stale/disconnected data.
+        if (!adbReady || !RemoteClimateCommands.canExecute(snapshot?.speed, snapshot?.gear, sampleAge(), TrackingService.vehicleDataConnected.value, requiresPark = false)) {
+            _state.value = _state.value.copy(message = "Задание ожидает ADB и свежих данных автомобиля")
             return
         }
         if (cmd.getLong("expires") * 1000 <= System.currentTimeMillis()) return
         val c = cmd.getJSONObject("climate")
-        val commands = RemoteClimateCommands.commands(RemoteClimateCommands.Climate(c.getBoolean("enabled"), c.getInt("temperature"), c.getInt("fan"), c.getInt("driver_heat"), c.getInt("passenger_heat")))
+        fun flag(key: String): Boolean? = if (c.has(key) && !c.isNull(key)) c.getBoolean(key) else null
+        val commands = RemoteClimateCommands.commands(RemoteClimateCommands.Climate(c.getBoolean("enabled"), c.getInt("temperature"), c.getInt("fan"), 0, 0,
+            flag("compressor"), flag("recirculation"), flag("front_defrost"), flag("mirror_heat"),
+            if (c.has("wind_mode") && !c.isNull("wind_mode")) c.getInt("wind_mode") else null))
         val journal = JSONObject().put("id", cmd.getString("id"))
         check(prefs.edit().putString("journal", journal.toString()).commit())
         val lines = mutableListOf(cmd.optString("reason", "Удалённый климат"))
@@ -151,9 +154,28 @@ class RemoteControlManager @Inject constructor(
             currentCoroutineContext().ensureActive()
             if (!prefs.getBoolean("enabled", false)) { lines += "Остановлено: удалённое управление отключено"; break }
             val live = TrackingService.lastData.value
-            if (!RemoteClimateCommands.canExecute(live?.speed, live?.gear, sampleAge(), TrackingService.vehicleDataConnected.value)) { lines += "Остановлено: машина не в P или нет свежих данных"; break }
-            val result = vehicle.dispatch(command)
-            if (result.isSuccess) { successes++; lines += "✓ $label: команда принята" }
+            if (!RemoteClimateCommands.canExecute(live?.speed, live?.gear, sampleAge(), TrackingService.vehicleDataConnected.value, requiresPark = false)) { lines += "Остановлено: нет свежих данных автомобиля"; break }
+            if (RemoteClimateCommands.requiresPark(command) && !RemoteClimateCommands.canExecute(live?.speed, live?.gear, sampleAge(), TrackingService.vehicleDataConnected.value)) {
+                lines += "Пропущено: $label — требуется стоящая машина в P"
+                continue
+            }
+            val result = if (command == RemoteClimateCommands.POWER_ON || command == RemoteClimateCommands.POWER_OFF) {
+                if (adb.setClimatePower(command == RemoteClimateCommands.POWER_ON)) Result.success(Unit)
+                else Result.failure(IllegalStateException("Питание климата не подтверждено чтением состояния"))
+            } else if (Regex("bydmate:wind:[1-7]").matches(command)) {
+                if (adb.setClimateWindMode(command.last().digitToInt())) Result.success(Unit)
+                else Result.failure(IllegalStateException("Направление потока не подтверждено чтением состояния"))
+            } else if (command == RemoteClimateCommands.COMPRESSOR_ON || command == RemoteClimateCommands.COMPRESSOR_OFF) {
+                if (adb.setAcCompressorViaStockUi(command == RemoteClimateCommands.COMPRESSOR_ON)) Result.success(Unit)
+                else Result.failure(IllegalStateException("Штатная кнопка A/C не подтвердила состояние"))
+            } else vehicle.dispatch(command)
+            if (result.isSuccess) {
+                successes++
+                val verified = command.startsWith("设置温度") || command.startsWith("设置风量") || command.startsWith("bydmate:wind:") ||
+                    command == RemoteClimateCommands.POWER_ON || command == RemoteClimateCommands.POWER_OFF ||
+                    command == RemoteClimateCommands.COMPRESSOR_ON || command == RemoteClimateCommands.COMPRESSOR_OFF
+                lines += "✓ $label: ${if (verified) "настройка подтверждена" else "команда принята"}"
+            }
             else lines += "✗ $label: ${result.exceptionOrNull()?.message?.take(180) ?: "не выполнено"}"
             delay(400)
         }

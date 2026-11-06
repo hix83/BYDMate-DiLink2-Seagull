@@ -6,6 +6,7 @@ import android.os.Parcel
 import android.util.Log
 import android.view.Surface
 import com.bydmate.app.helper.HelperBinderProtocol
+import com.bydmate.app.helper.dtc.readDtcScanStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -33,6 +34,11 @@ enum class FreeformLaunchResult { OK, UNAVAILABLE, FAILED }
  * BYDMateApp.onCreate — do NOT add HiddenApiBypass here.
  */
 interface HelperClient {
+    suspend fun daemonVersion(): Long? = null
+    suspend fun registerClient(): Int? = null
+    suspend fun dtcScanStart(gearDev: Int, gearFid: Int): Int? = null
+    suspend fun dtcScanStatus(): com.bydmate.app.helper.dtc.DtcScanStatus? = null
+    suspend fun dtcEraseStart(gearDev: Int, gearFid: Int, speedDev: Int, speedFid: Int, addrs: IntArray): Int? = null
     suspend fun read(dev: Int, fid: Int, tx: Int = 5): Long?
 
     /**
@@ -123,6 +129,26 @@ interface HelperClient {
 
 @Singleton
 open class HelperClientImpl @Inject constructor() : HelperClient {
+    override suspend fun daemonVersion(): Long? =
+        transact(HelperBinderProtocol.TX_GET_VERSION) { }
+            ?.let { (status, value) -> if (readAccepted(status)) value.toLong() else null }
+
+    override suspend fun registerClient(): Int? =
+        transactParsed(HelperBinderProtocol.TX_REGISTER_CLIENT, { it.writeStrongBinder(clientToken) }) {
+            if (it.dataAvail() >= 4) it.readInt() else null
+        }
+    override suspend fun dtcScanStart(gearDev: Int, gearFid: Int): Int? =
+        transactParsed(HelperBinderProtocol.TX_DTC_SCAN_START, { it.writeInt(gearDev); it.writeInt(gearFid) }, retryDead = false, notHandled = -2) {
+            if (it.dataAvail() >= 4) it.readInt() else null
+        }
+
+    override suspend fun dtcScanStatus(): com.bydmate.app.helper.dtc.DtcScanStatus? =
+        transactParsed(HelperBinderProtocol.TX_DTC_SCAN_STATUS, { }, parse = ::readDtcScanStatus)
+
+    override suspend fun dtcEraseStart(gearDev: Int, gearFid: Int, speedDev: Int, speedFid: Int, addrs: IntArray): Int? =
+        transactParsed(HelperBinderProtocol.TX_DTC_ERASE_START, {
+            it.writeInt(gearDev); it.writeInt(gearFid); it.writeInt(speedDev); it.writeInt(speedFid); it.writeIntArray(addrs)
+        }, retryDead = false, notHandled = -2) { if (it.dataAvail() >= 4) it.readInt() else null }
     private val mutex = Mutex()
     @Volatile private var cached: IBinder? = null
 
@@ -294,6 +320,8 @@ open class HelperClientImpl @Inject constructor() : HelperClient {
         code: Int,
         writeArgs: (Parcel) -> Unit,
         timeoutMs: Long = REQ_TIMEOUT_MS,
+        retryDead: Boolean = true,
+        notHandled: T? = null,
         parse: (Parcel) -> T?,
     ): T? =
         withContext(Dispatchers.IO) {
@@ -307,10 +335,12 @@ open class HelperClientImpl @Inject constructor() : HelperClient {
                             data.writeInterfaceToken(HelperBinderProtocol.DESCRIPTOR)
                             writeArgs(data)
                             val ok = binder.transact(code, data, reply, 0)
-                            if (!ok) return@withLock null           // uid gate rejected / not handled
+                            if (!ok) return@withLock notHandled     // uid gate rejected / not handled
                             return@withLock parse(reply)
                         } catch (e: DeadObjectException) {
                             cached = null                            // stale binder; loop re-resolves once
+                            // Diagnostic start may already have sent an ECU command. Never replay it.
+                            if (!retryDead) return@withLock null
                             if (attempt == 1) { Log.w(TAG, "binder dead after retry: ${e.message}"); return@withLock null }
                         } catch (e: Exception) {
                             Log.w(TAG, "transact failed: ${e.message}"); return@withLock null
@@ -337,7 +367,10 @@ open class HelperClientImpl @Inject constructor() : HelperClient {
     }
 
     /** Production: look the daemon up by name. Overridable so tests can inject a fake IBinder. */
-    internal open fun resolveBinder(): IBinder? = try {
+    internal open fun resolveBinder(): IBinder? = serviceManagerBinder()
+        ?: com.bydmate.app.helper.HelperBinderHolder.binder?.takeIf { it.isBinderAlive }
+
+    internal open fun serviceManagerBinder(): IBinder? = try {
         val sm = Class.forName("android.os.ServiceManager")
         (sm.getMethod("getService", String::class.java)
             .invoke(null, HelperBinderProtocol.SERVICE_NAME) as? IBinder)
@@ -346,6 +379,7 @@ open class HelperClientImpl @Inject constructor() : HelperClient {
     }
 
     companion object {
+        private val clientToken: android.os.Binder by lazy { android.os.Binder() }
         /**
          * The daemon forwards the raw autoservice transact return code in status.
          * Validated on Leopard 3 2026-05-28:

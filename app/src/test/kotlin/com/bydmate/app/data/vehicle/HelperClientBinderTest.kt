@@ -19,6 +19,41 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29])
 class HelperClientBinderTest {
+    @Test fun `diagnostic starts report an old daemon without replay`() = runBlocking {
+        val client = clientWith(rejectingFake)
+        assertEquals(-2, client.dtcScanStart(1011, 555745336))
+        assertEquals(-2, client.dtcEraseStart(1011, 555745336, 1013, -1807745016, intArrayOf(0x712)))
+        assertNull(client.dtcScanStatus())
+    }
+
+    @Test fun `diagnostic erase is never retried after a lost binder reply`() = runBlocking {
+        var calls = 0
+        val binder = object : FakeIBinder() {
+            override fun transact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
+                calls++
+                throw DeadObjectException("reply lost after command")
+            }
+        }
+        assertNull(clientWith(binder).dtcEraseStart(1011, 555745336, 1013, -1807745016, intArrayOf(0x712)))
+        assertEquals(1, calls)
+    }
+
+    @Test fun `diagnostic start forwards only the requested fixed layout`() = runBlocking {
+        val binder = object : FakeIBinder() {
+            override fun transact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
+                data.setDataPosition(0)
+                data.enforceInterface(HelperBinderProtocol.DESCRIPTOR)
+                assertEquals(HelperBinderProtocol.TX_DTC_ERASE_START, code)
+                assertEquals(1011, data.readInt()); assertEquals(555745336, data.readInt())
+                assertEquals(1013, data.readInt()); assertEquals(-1807745016, data.readInt())
+                org.junit.Assert.assertArrayEquals(intArrayOf(0x712), data.createIntArray())
+                assertEquals(0, data.dataAvail())
+                reply!!.writeInt(0); reply.setDataPosition(0)
+                return true
+            }
+        }
+        assertEquals(0, clientWith(binder).dtcEraseStart(1011, 555745336, 1013, -1807745016, intArrayOf(0x712)))
+    }
 
     // ---------------------------------------------------------------------------
     // Helpers
