@@ -19,6 +19,7 @@ class DtcDescriber(
     private val autoType: suspend () -> Int?,
     private val energy: () -> DtcEnergy,
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val reference: (DtcFound) -> DtcDescription? = { null },
 ) {
     private val lock = Mutex()
     @Volatile private var descriptions: DtcDescriptions? = null
@@ -33,7 +34,7 @@ class DtcDescriber(
             found.mapNotNull { f ->
                 val code7 = f.row.code.replace("-", "")
                 val cls = DtcBlockClass.of(f.block)
-                val desc = d.lookup(model, kind, cls, code7)
+                val desc = d.lookup(model, kind, cls, code7) ?: reference(f)
                 Log.i(
                     TAG,
                     "desc addr=0x%X code=%s class=%s autotype=%s energy=%s level=%s manual=%s".format(

@@ -10,7 +10,7 @@ enum class DtcEnergy { EV, DM, UNKNOWN }
 enum class DtcDescLevel { EXACT, SIMILAR }
 
 /** [manual] = the manual id the text came from (the first one for SIMILAR), for the log. */
-data class DtcDescription(val en: String, val zh: String, val level: DtcDescLevel, val manual: String? = null)
+data class DtcDescription(val en: String, val zh: String, val level: DtcDescLevel, val manual: String? = null, val ru: String? = null)
 
 /** One `rows.tsv` line: [blockClass] null when the manual does not say which block. */
 class DtcTableRow(val manual: String, val blockClass: String?, val text: DtcText)

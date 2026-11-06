@@ -44,6 +44,7 @@ class DtcFeature @Inject constructor(
             open = { context.assets.open("dtc/$it").reader(Charsets.UTF_8) },
             autoType = { CarAutoType.read(helper) },
             energy = { DtcEnergy.EV },
+            reference = { CanFdDtcDescriptions.lookup(it, readOnlyFirmware) },
         ),
     )
 }

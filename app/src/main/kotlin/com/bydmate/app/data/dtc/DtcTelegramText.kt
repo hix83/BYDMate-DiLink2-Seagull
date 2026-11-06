@@ -145,7 +145,7 @@ object DtcTelegramText {
     private fun codeLine(f: DtcFound, labels: DtcLabels, description: DtcDescription?, zh: Boolean): String =
         listOfNotNull(
             f.row.code,
-            description?.let { if (zh) it.zh else it.en }?.takeIf { it.isNotBlank() },
+            description?.let { if (zh) it.zh else it.ru ?: it.en }?.takeIf { it.isNotBlank() },
             labels.pendingMark.takeIf { f.row.kind == DtcKind.PENDING },
         ).joinToString(" · ")
 }

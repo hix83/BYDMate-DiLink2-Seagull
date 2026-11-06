@@ -169,7 +169,7 @@ fun DtcSection(viewModel: DtcViewModel = hiltViewModel()) {
                         Text(row.code + " · " + when (row.kind) { DtcKind.NOW -> "активная"; DtcKind.OLD -> "сохранённая"; DtcKind.PENDING -> "ожидает подтверждения" })
                         val found = summary.found.firstOrNull { it.addr == group.addrs.first() && it.row == row }
                         descriptions[found]?.let { description ->
-                            Text(description.en, style = MaterialTheme.typography.bodySmall)
+                            Text(description.ru ?: description.en, style = MaterialTheme.typography.bodySmall)
                             if (description.level == DtcDescLevel.SIMILAR) Text(RussianDtcLabels.similarNote, style = MaterialTheme.typography.bodySmall)
                         }
                     }

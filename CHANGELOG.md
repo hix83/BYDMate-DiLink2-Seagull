@@ -8,6 +8,13 @@
 
 ## [Unreleased]
 
+## [3.9.4] - 2026-11-06
+
+### Исправления
+- Добавлены русские справочные расшифровки B1AB7-00 и U0247-87 в блоке 0x741, B2A4B-92 в 0x720 для проверенной прошивки Чайки. Они работают при AutoType 148 без сопоставленного руководства и при неизвестном классе ЭБУ.
+- Описания отображаются в результате сканирования и Telegram-отчёте, с сохранением отметки справочного источника. Точный подбор по руководству модели имеет приоритет.
+- Проверены сохранённые 19 ответов и успешная отправка диагностического отчёта из 3.9.3. Стирание остаётся отключённым. Подробности: [релиз 3.9.4](docs/releases/v3.9.4.md).
+
 ## [3.9.3] - 2026-11-06
 
 ### Изменения
@@ -917,7 +924,8 @@
 ### Removed
 - `fallbackToDestructiveMigration`.
 
-[Unreleased]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.3...HEAD
+[Unreleased]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.4...HEAD
+[3.9.4]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.3...v3.9.4
 [3.9.3]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.2...v3.9.3
 [3.9.2]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.1...v3.9.2
 [3.9.1]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.0...v3.9.1
