@@ -7,6 +7,23 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DtcTelegramTextTest {
+    @Test fun `Telegram preserves both verified alias addresses and emits a fault once`() {
+        val id = DtcFixtures.hex("62F19448370011AB7E000001")
+        val results = listOf(0x743, 0x7E0).map {
+            com.bydmate.app.helper.dtc.DtcAddressResult(it, "ok", DtcFixtures.hex("5901FF000001"),
+                DtcFixtures.hex("59020D9AB70009"), id)
+        }
+        val text = text(DtcParser.summarize(results))
+        assertTrue(text.lines().any { it.contains("0x743") && it.contains("0x7E0") })
+        assertEquals(1, text.lines().count { it.trim() == "B1AB7-00" })
+    }
+
+    @Test fun `Russian report uses the actual profile total`() {
+        val summary = DtcScanSummary(19, 19, 0, 0, 0, emptyList())
+        val text = DtcTelegramText.build(summary, "now", com.bydmate.app.ui.settings.RussianDtcLabels)
+        assertTrue(text.contains("19/19"))
+        assertFalse(text.contains("19/18"))
+    }
     @Test fun `zero responding blocks never reports a clean car`() {
         val t = text(DtcScanSummary(0, 18, 0, 0, 0, emptyList()))
         assertTrue(t.contains(labels.noAnswers))

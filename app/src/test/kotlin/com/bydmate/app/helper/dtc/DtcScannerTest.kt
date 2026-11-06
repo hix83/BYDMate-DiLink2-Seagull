@@ -65,12 +65,13 @@ class DtcScannerTest {
         var gear: () -> Int? = { 1 }
         var speed: () -> Int? = { 0 }
         var legacyGate: (() -> String?)? = null
+        var scanAddresses = DtcWire.ADDRESSES
         val tasks = mutableListOf<Runnable>()
         var inline = true
 
         val scanner by lazy {
             DtcScanner(device, clock, { guard() }, runner = { if (inline) it.run() else tasks += it },
-                readSpeed = { speed() }, legacyReadGate = legacyGate)
+                readSpeed = { speed() }, legacyReadGate = legacyGate, addresses = scanAddresses)
         }
 
         fun run(): DtcScanStatus { scanner.start { gear() }; return scanner.status() }
@@ -105,6 +106,24 @@ class DtcScannerTest {
     private fun isClear(p: ByteArray) = (p[4].toInt() and 0xFF) == 0x14
     private fun addrOf(p: ByteArray) = ((p[1].toInt() and 0xFF) shl 8) or (p[2].toInt() and 0xFF)
     private fun DtcScanStatus.of(addr: Int) = results.first { it.addr == addr }
+
+    @Test fun `Seagull scans only discovered addresses and reads list after short count`() {
+        val w = world { request ->
+            val addr = addrOf(request)
+            val uds = if (isList(request)) "59020D" else if (addr == 0x766) "5901FF0000" else "590109000000"
+            listOf(DtcFixtures.frame(addr, hex(uds)))
+        }
+        w.guard = { null }
+        w.legacyGate = { null }
+        w.scanAddresses = CanFdDtcReadOnlyProtocol.ADDRESSES
+        val result = w.run()
+        assertEquals(DtcWire.STATE_DONE, result.state)
+        assertEquals(19, result.total)
+        assertEquals(19, result.done)
+        assertEquals(w.scanAddresses.toList(), result.results.map { it.addr })
+        assertEquals(listOf("1901FF", "19020D"), w.device.requests(0x766))
+        assertTrue(w.device.sent.all { addrOf(it) in w.scanAddresses && !isClear(it) })
+    }
 
     @Test fun `inspected legacy read works without manager when OTA is idle`() {
         val w = world()

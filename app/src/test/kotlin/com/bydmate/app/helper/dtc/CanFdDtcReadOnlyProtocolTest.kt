@@ -7,13 +7,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CanFdDtcReadOnlyProtocolTest {
+    @Test fun `profile contains only 19 responding addresses and refuses old nonresponders`() {
+        val addresses = CanFdDtcReadOnlyProtocol.ADDRESSES
+        assertEquals(19, addresses.size)
+        assertEquals(19, addresses.toSet().size)
+        addresses.forEach { CanFdDtcReadOnlyProtocol.encode(DtcWire.countRequest(it)) }
+        (DtcWire.ADDRESSES.toSet() - addresses.toSet()).forEach { addr ->
+            assertThrows(IllegalArgumentException::class.java) {
+                CanFdDtcReadOnlyProtocol.encode(DtcWire.countRequest(addr))
+            }
+        }
+    }
     @Test fun `count uses the firmware container without changing UDS`() {
         assertArrayEquals(hex("0107E0031901FF"), CanFdDtcReadOnlyProtocol.encode(DtcWire.countRequest(0x7E0)))
     }
 
     @Test fun `only fixed supported reads may reach the transport`() {
-        val requests = listOf(DtcWire.countRequest(0x712), DtcWire.listRequest(0x720, 0x0D),
-            DtcWire.identityRequest(0x7E0), DtcWire.snapshotRequest(0x7E1, 0x123456))
+        val requests = listOf(DtcWire.countRequest(0x711), DtcWire.listRequest(0x720, 0x0D),
+            DtcWire.identityRequest(0x7E0), DtcWire.snapshotRequest(0x781, 0x123456))
         requests.forEach { request ->
             val encoded = CanFdDtcReadOnlyProtocol.encode(request)
             assertEquals(1.toByte(), encoded[0])

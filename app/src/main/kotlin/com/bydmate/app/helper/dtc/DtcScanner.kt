@@ -36,6 +36,7 @@ class DtcScanner(
     private val readSpeed: () -> Int? = { null },
     /** Explicit inspected old-firmware policy; null retains the original manager guard. Never permits erase. */
     private val legacyReadGate: (() -> String?)? = null,
+    private val addresses: IntArray = DtcWire.ADDRESSES,
 ) {
     /** Ends the run from anywhere inside it with its terminal state. */
     private class Stop(val state: Int, val reason: String) : RuntimeException(reason)
@@ -117,7 +118,7 @@ class DtcScanner(
     }
 
     fun status(): DtcScanStatus = synchronized(lock) {
-        val total = if (mode == DtcWire.MODE_ERASE) erase.size else DtcWire.ADDRESSES.size
+        val total = if (mode == DtcWire.MODE_ERASE) erase.size else addresses.size
         DtcScanStatus(state, done, total, reason, results.toList(), erase.toList(), mode)
     }
 
@@ -145,11 +146,11 @@ class DtcScanner(
         synchronized(lock) {
             run.current?.let { results += it.result() }
             val seen = results.map { it.addr }.toSet()
-            DtcWire.ADDRESSES.filter { it !in seen }.forEach { results += Acc(it).result() }
+            addresses.filter { it !in seen }.forEach { results += Acc(it).result() }
         }
         val list = status().results
         log(
-            "end state=${stateName(stop.state)} reason=${stop.reason} done=$done/${DtcWire.ADDRESSES.size} " +
+            "end state=${stateName(stop.state)} reason=${stop.reason} done=$done/${addresses.size} " +
                 "ok=${list.count { it.outcome == DtcWire.OUTCOME_OK }} " +
                 "nrc=${list.count { it.outcome == DtcWire.OUTCOME_NRC }} " +
                 "no_answer=${list.count { it.outcome == DtcWire.OUTCOME_NO_ANSWER }} " +
@@ -203,8 +204,8 @@ class DtcScanner(
 
     /** The whole scan; returns the terminal state (DONE or no_frames) or throws [Stop]. */
     private fun scan(run: Run): Stop {
-        open(run, "scan", DtcWire.ADDRESSES.size)
-        for (addr in DtcWire.ADDRESSES) {
+        open(run, "scan", addresses.size)
+        for (addr in addresses) {
             val acc = Acc(addr)
             run.current = acc
             val started = clock.nowMs()
@@ -290,11 +291,11 @@ class DtcScanner(
         acc.countUds = udsOf(count, DtcWire.SERVICE_READ_DTC)
         if (count !is DtcMatch.Answer) return emptyList()
         val uds = count.uds
-        if (uds.size < COUNT_UDS_BYTES) return emptyList()
-        val records = (u(uds, 4) shl 8) or u(uds, 5)
+        if (uds.size < COUNT_UDS_BYTES && legacyReadGate == null) return emptyList()
+        val records = if (uds.size >= COUNT_UDS_BYTES) (u(uds, 4) shl 8) or u(uds, 5) else null
         if (records == 0) return emptyList()
 
-        val mask = if (u(uds, 2) and STATUS_PENDING != 0) MASK_WITH_PENDING else MASK_CONFIRMED
+        val mask = if (uds.size < 3 || u(uds, 2) and STATUS_PENDING != 0) MASK_WITH_PENDING else MASK_CONFIRMED
         var list = request(run, addr, DtcWire.listRequest(addr, mask), DtcWire.SERVICE_READ_DTC, DtcWire.SUB_LIST)
         if (list is DtcMatch.Nrc) {
             log("list retry addr=${hexAddr(addr)} mask=${"%02X".format(mask)} nrc=0x${"%02X".format(list.code)} next=FF")

@@ -4,7 +4,7 @@ package com.bydmate.app.data.dtc
 enum class DtcBlock { ADAS, BRAKES, STEERING, AIRBAG, RADAR, BMS, CHARGER, URE, BODY, UNKNOWN }
 
 /** [block] plus the address, which the display text appends for [DtcBlock.BODY] and [DtcBlock.UNKNOWN]. */
-data class DtcBlockName(val block: DtcBlock, val addr: Int)
+data class DtcBlockName(val block: DtcBlock, val addr: Int, val aliasGroup: String? = null)
 
 object DtcBlockNames {
     /** (supplier, type) of the Leopard 3 blocks, as their own F194 answers read on the car. */
@@ -31,6 +31,11 @@ object DtcBlockNames {
         val unknown = DtcBlockName(DtcBlock.UNKNOWN, addr)
         if (idUds == null || idUds.size < ID_HEAD_LEN) return unknown
         if (u(idUds, 0) != 0x62 || u(idUds, 1) != 0xF1 || u(idUds, 2) != 0x94) return unknown
+        // These two addresses returned exactly the same EQEA identity on the inspected car.
+        // Group only this pair with this complete identity; never infer aliases from supplier alone.
+        if (addr in setOf(0x743, 0x7E0) && idUds.contentEquals(EQEA_ID)) {
+            return unknown.copy(aliasGroup = "canfd_eqea_743_7e0")
+        }
         val supplier = (u(idUds, 3) shl 8) or u(idUds, 4)
         val type = u(idUds, TYPE_INDEX)
         if (supplier == BODY_SUPPLIER && type in BODY_TYPES) return DtcBlockName(DtcBlock.BODY, addr)
@@ -38,4 +43,6 @@ object DtcBlockNames {
     }
 
     private fun u(b: ByteArray, i: Int): Int = b[i].toInt() and 0xFF
+
+    private val EQEA_ID = byteArrayOf(0x62, 0xF1.toByte(), 0x94.toByte(), 0x48, 0x37, 0, 0x11, 0xAB.toByte(), 0x7E, 0, 0, 1)
 }

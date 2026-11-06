@@ -65,6 +65,8 @@ class DtcScanStatus(
 
 @Suppress("TooManyFunctions") // one builder per fixed request plus the matcher's small steps
 object DtcWire {
+    /** Public fork remains read-only while ECU coverage and decoding are being verified. */
+    const val ERASE_ENABLED = false
     const val STATE_IDLE = 0
     const val STATE_RUNNING = 1
     const val STATE_DONE = 2
@@ -98,6 +100,9 @@ object DtcWire {
         0x712, 0x720, 0x722, 0x726, 0x747, 0x762, 0x782, 0x783, 0x7E0,
         0x7E1, 0x7E2, 0x7E3, 0x7E4, 0x7E5, 0x7E6, 0x7E7, 0x7F1, 0x7F2,
     )
+    /** Shared codec accepts the finite union; each scanner/transport selects its own firmware profile. */
+    val READ_ADDRESSES: IntArray = (ADDRESSES + CanFdDtcReadOnlyProtocol.ADDRESSES).distinct().toIntArray()
+    val MAX_SCAN_RESULTS: Int = maxOf(ADDRESSES.size, CanFdDtcReadOnlyProtocol.ADDRESSES.size)
 
     /** Services of the only requests ever built: read DTC information, read data by identifier, clear DTC. */
     const val SERVICE_READ_DTC = 0x19
@@ -151,7 +156,7 @@ object DtcWire {
 
     /** `19 04 <dtc> FF`: the snapshot records of one code ([dtc] is the 3-byte code); logged only. */
     fun snapshotRequest(addr: Int, dtc: Int): ByteArray {
-        require(addr in ADDRESSES) { "address not in read whitelist" }
+        require(addr in READ_ADDRESSES) { "address not in read whitelist" }
         return byteArrayOf(
             FRAME_PREFIX.toByte(), (addr shr 8).toByte(), addr.toByte(), SNAPSHOT_LEN.toByte(),
             SERVICE_READ_DTC.toByte(), SUB_SNAPSHOT.toByte(),
@@ -172,7 +177,7 @@ object DtcWire {
     }
 
     private fun request(addr: Int, service: Int, b1: Int, b2: Int): ByteArray {
-        require(addr in ADDRESSES) { "address not in read whitelist" }
+        require(addr in READ_ADDRESSES) { "address not in read whitelist" }
         return byteArrayOf(
             FRAME_PREFIX.toByte(), (addr shr 8).toByte(), addr.toByte(), REQUEST_LEN.toByte(),
             service.toByte(), b1.toByte(), b2.toByte(),
@@ -288,7 +293,7 @@ fun readDtcScanStatus(p: Parcel): DtcScanStatus? {
     val reason = p.readString()?.takeIf { it.length <= MAX_TEXT } ?: return null
     if (p.dataAvail() < INT_BYTES) return null
     val count = p.readInt()
-    if (count !in 0..DtcWire.ADDRESSES.size) return null
+    if (count !in 0..DtcWire.MAX_SCAN_RESULTS) return null
     val results = ArrayList<DtcAddressResult>(count)
     repeat(count) { results += readAddressResult(p) ?: return null }
     // A daemon from before the erase ends here: a scan without erase entries.

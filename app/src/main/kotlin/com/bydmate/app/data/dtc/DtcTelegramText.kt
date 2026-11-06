@@ -4,6 +4,7 @@ package com.bydmate.app.data.dtc
 interface DtcLabels {
     val title: String
     fun checked(at: String, answered: Int): String
+    fun checked(at: String, answered: Int, total: Int): String = checked(at, answered)
     val nowHeader: String
     val oldHeader: String
     val pendingMark: String
@@ -75,7 +76,7 @@ object DtcTelegramText {
         zh: Boolean,
     ): String = buildString {
         appendLine(labels.title)
-        appendLine(labels.checked(checkedAt, summary.answered))
+        appendLine(labels.checked(checkedAt, summary.answered, summary.total))
         appendLine()
         val all = rows.all
         val shown = rows.count

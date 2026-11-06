@@ -28,6 +28,7 @@ internal object DtcDaemon {
                 if (!CanFdDiagnosticCache.supports(::readDtcSystemProperty)) "firmware_changed"
                 else CanFdDtcReadOnlyProtocol.gate(otaState?.invoke(), readDtcSystemProperty("persist.sys.byd.otaupdate"))
             }) else null,
+            addresses = if (legacy) CanFdDtcReadOnlyProtocol.ADDRESSES else DtcWire.ADDRESSES,
         )
     }
 }

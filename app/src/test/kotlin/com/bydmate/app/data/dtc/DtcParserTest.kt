@@ -10,6 +10,40 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DtcParserTest {
+    private val eqeaIdentity = hex("62F19448370011AB7E000001")
+
+    private fun eqea(addr: Int, id: ByteArray? = eqeaIdentity, list: String = "59020D9AB70009") =
+        DtcAddressResult(addr, "ok", hex("5901FF000001"), hex(list), id)
+
+    @Test fun `verified EQEA aliases retain both addresses and count identical faults once`() {
+        val summary = DtcParser.summarize(listOf(eqea(0x743), eqea(0x7E0)))
+        assertEquals(2, summary.answered)
+        assertEquals(1, summary.now)
+        assertEquals(listOf(0x743, 0x7E0), DtcParser.groups(summary.found).single().addrs)
+    }
+
+    @Test fun `different alias responses or unconfirmed identities never hide faults`() {
+        val cases = listOf(
+            listOf(eqea(0x743), eqea(0x7E0, list = "59020DC2478709")),
+            listOf(eqea(0x743), eqea(0x7E0, id = null)),
+            listOf(eqea(0x743), eqea(0x7E0, id = eqeaIdentity.copyOf().also { it[11] = 2 })),
+            listOf(eqea(0x743), eqea(0x780)),
+        )
+        cases.forEach { results ->
+            val summary = DtcParser.summarize(results)
+            assertEquals(2, summary.now)
+            assertEquals(2, DtcParser.groups(summary.found).size)
+        }
+    }
+
+    @Test fun `short count requires a valid separate list before absence can be reported`() {
+        for (list in listOf(null, hex("5902"), hex("59020D00"))) {
+            val result = DtcAddressResult(0x766, "ok", hex("5901FF0000"), list, null)
+            assertEquals(1, DtcParser.summarize(listOf(result)).unreadBlocks)
+        }
+        val result = DtcAddressResult(0x766, "ok", hex("5901FF0000"), hex("59020D"), null)
+        assertEquals(0, DtcParser.summarize(listOf(result)).unreadBlocks)
+    }
 
     private fun count(addr: Int) = DtcParser.parseCount(DtcFixtures.uds("count-${DtcFixtures.hexAddr(addr)}.txt"))
 

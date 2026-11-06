@@ -18,6 +18,7 @@ import javax.inject.Inject
 internal object RussianDtcLabels : DtcLabels {
     override val title = "BYDMate — диагностика ошибок"
     override fun checked(at: String, answered: Int) = "Проверка: $at · Ответили блоков: $answered/${com.bydmate.app.helper.dtc.DtcWire.ADDRESSES.size}"
+    override fun checked(at: String, answered: Int, total: Int) = "Проверка: $at · Ответили адресов: $answered/$total"
     override val nowHeader = "Активные ошибки"
     override val oldHeader = "Сохранённые и ожидающие подтверждения"
     override val pendingMark = "ожидает подтверждения"
@@ -125,7 +126,7 @@ fun DtcSection(viewModel: DtcViewModel = hiltViewModel()) {
 
     Text("Диагностика ошибок", style = MaterialTheme.typography.titleLarge)
     Text(if (viewModel.readOnlyFirmware) "DiLink 2/CANFD: чтение кодов ЭБУ, только в P и при неактивном OTA. Стирание отключено. При постороннем обмене опрос останавливается."
-        else "Чтение кодов блоков автомобиля и сброс с повторной проверкой. Только на стоящей машине в P. Для стирания скорость должна достоверно читаться как 0.", style = MaterialTheme.typography.bodySmall)
+        else "Чтение кодов блоков автомобиля. Только на стоящей машине в P. Стирание в этом релизе отключено.", style = MaterialTheme.typography.bodySmall)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = { expanded = true; viewModel.scan() }, enabled = !busy) { Text("Сканировать") }
         if (saved != null) OutlinedButton(onClick = { expanded = !expanded }) { Text(if (expanded) "Свернуть" else "Результат") }
@@ -152,7 +153,8 @@ fun DtcSection(viewModel: DtcViewModel = hiltViewModel()) {
     val uncertain = saved != null && (erasedAt ?: 0L) >= saved!!.at
     if (uncertain || saved?.eraseLocked?.isNotEmpty() == true) Text("Результат стирания части кодов неизвестен. Показаны последние известные данные — выполните новое сканирование.")
     if (expanded && saved != null && summary != null) {
-        Text("Проверено: ${DtcScanRepository.formatShort(saved!!.at)} · Ответили ${summary.answered}/${summary.total} блоков")
+        Text("Проверено: ${DtcScanRepository.formatShort(saved!!.at)} · Ответили ${summary.answered}/${summary.total} адресов")
+        if (viewModel.readOnlyFirmware) Text("Опрашиваются 19 ранее обнаруженных адресов. Совпадающие ошибки 0x743 и 0x7E0 объединяются при подтверждённом идентификаторе ПО. Число адресов не означает число физических ЭБУ.", style = MaterialTheme.typography.bodySmall)
         Text("Активные: ${summary.now} · Сохранённые: ${summary.old} · Ожидающие: ${summary.pending}")
         if (summary.answered == 0) Text("Ни один блок не ответил. Отсутствие ошибок не подтверждено.")
         else if (summary.found.isEmpty() && summary.unreadBlocks == 0) Text("В прочитанных данных ошибок не найдено.")
@@ -171,7 +173,7 @@ fun DtcSection(viewModel: DtcViewModel = hiltViewModel()) {
                             if (description.level == DtcDescLevel.SIMILAR) Text(RussianDtcLabels.similarNote, style = MaterialTheme.typography.bodySmall)
                         }
                     }
-                    if (!viewModel.readOnlyFirmware) OutlinedButton(enabled = !busy && !uncertain, onClick = {
+                    if (com.bydmate.app.helper.dtc.DtcWire.ERASE_ENABLED && !viewModel.readOnlyFirmware) OutlinedButton(enabled = !busy && !uncertain, onClick = {
                         val addrs = DtcErasePlan.eligibleBlock(saved, group.addrs.first(), System.currentTimeMillis())
                         if (addrs == null || addrs.isEmpty()) viewModel.message.value = "Перед стиранием выполните новое сканирование." else confirm = addrs
                     }) { Text("Стереть в этом блоке") }
@@ -180,7 +182,7 @@ fun DtcSection(viewModel: DtcViewModel = hiltViewModel()) {
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = viewModel::send, enabled = !busy && !sending && !uncertain) { Text(if (sending) "Отправка…" else "В Telegram") }
-            if (!viewModel.readOnlyFirmware && summary.found.isNotEmpty()) OutlinedButton(enabled = !busy && !uncertain, onClick = {
+            if (com.bydmate.app.helper.dtc.DtcWire.ERASE_ENABLED && !viewModel.readOnlyFirmware && summary.found.isNotEmpty()) OutlinedButton(enabled = !busy && !uncertain, onClick = {
                 val addrs = DtcErasePlan.eligible(saved, System.currentTimeMillis())
                 if (addrs == null || addrs.isEmpty()) viewModel.message.value = "Перед стиранием выполните новое сканирование." else confirm = addrs
             }) { Text("Стереть все") }

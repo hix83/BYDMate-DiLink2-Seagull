@@ -38,7 +38,8 @@ class DtcFeature @Inject constructor(
         serviceRunning = { TrackingService.isRunning.value },
         elapsedNow = SystemClock::elapsedRealtime,
         wallNow = System::currentTimeMillis,
-        eraseEnabled = !readOnlyFirmware,
+        eraseEnabled = com.bydmate.app.helper.dtc.DtcWire.ERASE_ENABLED && !readOnlyFirmware,
+        scanTotal = if (readOnlyFirmware) com.bydmate.app.helper.dtc.CanFdDtcReadOnlyProtocol.ADDRESSES.size else com.bydmate.app.helper.dtc.DtcWire.ADDRESSES.size,
         describer = DtcDescriber(
             open = { context.assets.open("dtc/$it").reader(Charsets.UTF_8) },
             autoType = { CarAutoType.read(helper) },

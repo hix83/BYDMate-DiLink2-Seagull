@@ -151,7 +151,7 @@ object DtcParser {
         .groupBy { it.addr }
         .map { (addr, list) -> DtcBlockGroup(listOf(addr), list.first().block, list.map { it.row }) }
         .groupBy { g ->
-            val unit = if (g.block.block in UNMERGED) g.addrs.single() else null
+            val unit: Any? = if (g.block.block in UNMERGED) g.block.aliasGroup ?: g.addrs.single() else null
             Triple(g.block.block, g.rows, unit)
         }
         .values
@@ -162,10 +162,16 @@ object DtcParser {
 
     /** The count answer says there are codes, but no list was read (no answer, NRC, multiframe, cut). */
     private fun unread(r: DtcAddressResult): Boolean {
-        val count = r.countUds?.let { parseCount(it) }?.count ?: return false
+        val count = r.countUds?.let { parseCount(it) }?.count
         if (count == 0) return false
+        // A short positive count (observed at 0x766) is unknown, never an implicit zero.
+        if (count == null && r.countUds?.let {
+            it.size >= 2 && u(it, 0) == POSITIVE_READ_DTC && u(it, 1) == DtcWire.SUB_COUNT
+        } != true) return false
         val list = r.listUds
-        return r.outcome != DtcWire.OUTCOME_OK || list == null || parseList(list, null).negative
+        return r.outcome != DtcWire.OUTCOME_OK || list == null || list.size < LIST_HEAD ||
+            u(list, 0) != POSITIVE_READ_DTC || u(list, 1) != DtcWire.SUB_LIST ||
+            (list.size - LIST_HEAD) % RECORD != 0
     }
 
     private fun u(b: ByteArray, i: Int): Int = b[i].toInt() and 0xFF

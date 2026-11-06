@@ -66,7 +66,7 @@ private fun handleDtcScanTransact(code: Int, data: Parcel, reply: Parcel?, svc: 
                 reply?.writeInt(status)
             }
             HelperBinderProtocol.TX_DTC_ERASE_START -> {
-                if (com.bydmate.app.helper.dtc.CanFdDiagnosticCache.supports(::readDtcSystemProperty)) {
+                if (!com.bydmate.app.helper.dtc.DtcWire.ERASE_ENABLED || com.bydmate.app.helper.dtc.CanFdDiagnosticCache.supports(::readDtcSystemProperty)) {
                     reply?.writeInt(-1) // The inspected DiLink 2 profile is strictly read-only.
                     return true
                 }

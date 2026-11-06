@@ -8,6 +8,15 @@
 
 ## [Unreleased]
 
+## [3.9.3] - 2026-11-06
+
+### Изменения
+- Профиль проверенной Чайки опрашивает 19 реально ответивших адресов вместо заготовки: добавлены 13 найденных адресов, неответившие кандидаты исключены.
+- Совпадающие ошибки 0x743/0x7E0 объединяются только с подтверждённым полным идентификатором ПО; разные ответы не скрываются.
+- При коротком счётчике 0x766 читается отдельный список; неизвестный или неполный результат не считается нулём ошибок.
+- Исправлены передача 19 результатов через helper и число адресов в Telegram. Стирание отключено для всего релиза.
+- Производственный проход на машине: 19/19 адресов, 2 активных и 1 сохранённая ошибка. Подробности и порядок обновления: [релиз 3.9.3](docs/releases/v3.9.3.md).
+
 ## [3.9.2] - 2026-11-06
 
 ### Новое
@@ -908,7 +917,8 @@
 ### Removed
 - `fallbackToDestructiveMigration`.
 
-[Unreleased]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.2...HEAD
+[Unreleased]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.3...HEAD
+[3.9.3]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.2...v3.9.3
 [3.9.2]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.1...v3.9.2
 [3.9.1]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.0...v3.9.1
 [3.9.0]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.8.5.2...v3.9.0

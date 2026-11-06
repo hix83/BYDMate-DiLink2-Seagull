@@ -99,8 +99,9 @@ class DtcScanRepository(
     private val describer: DtcDescriber? = null,
     private val speedAddress: () -> FidEntry = { FidMap.entries.first { it.field == "speed" } },
     private val eraseEnabled: Boolean = true,
+    private val scanTotal: Int = DtcWire.ADDRESSES.size,
 ) {
-    private val _state = MutableStateFlow(DtcScanState())
+    private val _state = MutableStateFlow(DtcScanState(total = scanTotal))
     val state: StateFlow<DtcScanState> = _state
 
     private val _last = MutableStateFlow(load())
@@ -136,7 +137,7 @@ class DtcScanRepository(
             return
         }
         Log.i(TAG, "tap gear=$gear state=${current.phase}")
-        _state.value = DtcScanState(phase = DtcScanPhase.SCANNING, total = DtcWire.ADDRESSES.size)
+        _state.value = DtcScanState(phase = DtcScanPhase.SCANNING, total = scanTotal)
         scope.launch { run() }
     }
 
