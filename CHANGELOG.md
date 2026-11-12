@@ -8,6 +8,14 @@
 
 ## [Unreleased]
 
+## [3.9.5] - 2026-11-12
+
+### Исправления
+- Назначение кнопки помощника/проекции теперь передаёт режим обучения и результат между основным процессом и `:steering`, вместо несвязанных статических переменных.
+- Добавлены идентификаторы сеансов, отмена, тайм-аут службы, защита от устаревших результатов и обработка отпускания кнопки после захвата.
+- Сохранённое назначение и включение функций передаются работающей службе без перезапуска, устраняя устаревший межпроцессный кэш настроек.
+- Подробности и проверка после обновления: [релиз 3.9.5](docs/releases/v3.9.5.md).
+
 ## [3.9.4] - 2026-11-06
 
 ### Исправления
@@ -924,7 +932,8 @@
 ### Removed
 - `fallbackToDestructiveMigration`.
 
-[Unreleased]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.4...HEAD
+[Unreleased]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.5...HEAD
+[3.9.5]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.4...v3.9.5
 [3.9.4]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.3...v3.9.4
 [3.9.3]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.2...v3.9.3
 [3.9.2]: https://github.com/hix83/BYDMate-DiLink2-Seagull/compare/v3.9.1...v3.9.2

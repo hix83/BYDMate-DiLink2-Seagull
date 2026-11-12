@@ -113,7 +113,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.annotation.StringRes
 import androidx.compose.ui.res.stringResource
 import com.bydmate.app.cluster.DEFAULT_TRIGGER_KEYCODE
-import com.bydmate.app.cluster.SteeringWheelKeyService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterNotNull
 import com.bydmate.app.R
@@ -1059,6 +1058,7 @@ private fun DisplaySection() {
                 onCheckedChange = {
                     enabled = it
                     prefs.edit().putBoolean(ClusterProjectionManager.KEY_MIRROR_ENABLED, it).apply()
+                    com.bydmate.app.cluster.SteeringKeyBridge.publishSettings(context)
                     // Turning the switch on self-enables our a11y key filter via the daemon, so star
                     // control works on a clean install with no ADB (DiLink has no a11y settings UI).
                     if (it) {
@@ -1352,7 +1352,7 @@ private sealed interface LearnUiState {
 
 /**
  * Learn-the-button dialog. Puts SteeringWheelKeyService into learn mode while open and collects the
- * captured key from its StateFlow (same process). States: Waiting → (Rejected loops) → Captured
+ * captured key through the process bridge. States: Waiting → (Rejected loops) → Captured
  * (confirm) / TimedOut. learnMode is always cleared on dispose.
  */
 @Composable
@@ -1361,12 +1361,13 @@ private fun LearnButtonDialog(
     onDismiss: () -> Unit,
 ) {
     var state by remember { mutableStateOf<LearnUiState>(LearnUiState.Waiting) }
+    val context = LocalContext.current
+    val session = remember { com.bydmate.app.cluster.SteeringKeyLearningSession(context) }
 
     // Clear learn mode AND the captured value on close, so a later reopen can't latch a stale capture.
     DisposableEffect(Unit) {
         onDispose {
-            SteeringWheelKeyService.learnMode = false
-            SteeringWheelKeyService.capturedKey.value = null
+            session.close()
         }
     }
 
@@ -1374,13 +1375,11 @@ private fun LearnButtonDialog(
     // new collector, so we reset it to null first and filterNotNull() drops both that reset and any
     // stale value left from a previous session — reopening therefore always starts at Waiting.
     LaunchedEffect(Unit) {
-        SteeringWheelKeyService.capturedKey.value = null
-        SteeringWheelKeyService.learnMode = true
-        SteeringWheelKeyService.capturedKey
+        session.start()
+        session.captured
             .filterNotNull()
             .collect { r ->
                 state = if (r.assignable) {
-                    SteeringWheelKeyService.learnMode = false
                     LearnUiState.Captured(r.keyCode)
                 } else {
                     LearnUiState.Rejected(r.keyCode)
@@ -1393,7 +1392,7 @@ private fun LearnButtonDialog(
         if (state is LearnUiState.Waiting || state is LearnUiState.Rejected) {
             delay(10_000)
             if (state is LearnUiState.Waiting || state is LearnUiState.Rejected) {
-                SteeringWheelKeyService.learnMode = false
+                session.stop()
                 state = LearnUiState.TimedOut
             }
         }
@@ -1401,8 +1400,7 @@ private fun LearnButtonDialog(
 
     // "Again": re-arm. The collector above keeps running (keyed on Unit), so just reset + Waiting.
     val restart = {
-        SteeringWheelKeyService.capturedKey.value = null
-        SteeringWheelKeyService.learnMode = true
+        session.start()
         state = LearnUiState.Waiting
     }
 

@@ -1288,6 +1288,7 @@ class SettingsViewModel @Inject constructor(
             // Mirror into "voice" SharedPreferences for SteeringWheelKeyService
             appContext.getSharedPreferences("voice", Context.MODE_PRIVATE)
                 .edit().putBoolean(SettingsRepository.KEY_VOICE_ENABLED, enabled).apply()
+            com.bydmate.app.cluster.SteeringKeyBridge.publishSettings(appContext)
             // Best-effort re-bind of the a11y key service (PTT is dead without it), same
             // pattern as ClusterProjectionManager.enableStarControl: bootstrap the daemon
             // FIRST — HelperClient only resolves an existing binder, so without ensureRunning()
@@ -1327,6 +1328,7 @@ class SettingsViewModel @Inject constructor(
             // Mirror for SteeringWheelKeyService
             appContext.getSharedPreferences("voice", Context.MODE_PRIVATE)
                 .edit().putInt(SettingsRepository.KEY_VOICE_KEYCODE, keycode).apply()
+            com.bydmate.app.cluster.SteeringKeyBridge.publishSettings(appContext)
         }
     }
 

@@ -416,6 +416,7 @@ object ClusterProjectionManager {
     fun setTriggerKeyCode(context: Context, keyCode: Int) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit().putInt(KEY_TRIGGER_KEYCODE, keyCode).apply()
+        SteeringKeyBridge.publishSettings(context)
     }
 
     /** Remember the last VirtualDisplay id so a future process can release it if we die holding it. */

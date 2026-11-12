@@ -749,6 +749,7 @@ class TrackingService : Service(), LocationListener {
             }
             ACTION_STEERING_A11Y_STATE -> {
                 steeringA11yConnected = intent.getBooleanExtra(EXTRA_STEERING_A11Y_CONNECTED, false)
+                if (steeringA11yConnected) com.bydmate.app.cluster.SteeringKeyBridge.publishSettings(this)
                 Log.i(TAG, "Steering a11y real bind state: $steeringA11yConnected")
             }
         }

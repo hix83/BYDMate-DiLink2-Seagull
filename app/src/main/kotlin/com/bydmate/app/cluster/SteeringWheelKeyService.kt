@@ -17,7 +17,7 @@ import com.bydmate.app.data.autoservice.ACTION_LEGACY_ADB_UI_PULSE
 import com.bydmate.app.navdata.NavA11yFeed
 import com.bydmate.app.service.TrackingService
 import dagger.hilt.android.EntryPointAccessors
-import kotlinx.coroutines.flow.MutableStateFlow
+import androidx.core.content.ContextCompat
 
 /**
  * Steering-wheel key filter for cluster projection. When the settings master switch
@@ -36,6 +36,46 @@ class SteeringWheelKeyService : AccessibilityService() {
     private var cachedEntryPoint: ClusterEntryPoint? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var legacyAdbReceiverRegistered = false
+    private var keyBridgeRegistered = false
+    private var learnSession: String? = null
+    private var capturedUpKey: Int? = null
+    private val expireCapturedKey = Runnable { capturedUpKey = null }
+    private var voiceEnabled = false
+    private var voiceKey = DEFAULT_VOICE_KEYCODE
+    private var projectionEnabled = false
+    private var projectionKey = DEFAULT_TRIGGER_KEYCODE
+    private val expireLearning = Runnable { learnSession = null }
+    private val keyBridge = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                SteeringKeyBridge.START -> {
+                    val session = intent.getStringExtra(SteeringKeyBridge.SESSION) ?: return
+                    if (session.length != 36) return
+                    learnSession = session
+                    renewLearningTimeout()
+                    Log.i(TAG, "learn armed")
+                }
+                SteeringKeyBridge.STOP -> if (intent.getStringExtra(SteeringKeyBridge.SESSION) == learnSession) clearLearning()
+                SteeringKeyBridge.SETTINGS -> {
+                    voiceEnabled = intent.getBooleanExtra("voice_enabled", false)
+                    voiceKey = intent.getIntExtra("voice_keycode", DEFAULT_VOICE_KEYCODE)
+                    projectionEnabled = intent.getBooleanExtra("mirror_enabled", false)
+                    projectionKey = intent.getIntExtra("trigger_keycode", DEFAULT_TRIGGER_KEYCODE)
+                    Log.i(TAG, "key settings received voice=$voiceKey projection=$projectionKey")
+                }
+            }
+        }
+    }
+
+    private fun renewLearningTimeout() {
+        mainHandler.removeCallbacks(expireLearning)
+        mainHandler.postDelayed(expireLearning, SteeringKeyBridge.LEARN_TIMEOUT_MS)
+    }
+
+    private fun clearLearning() {
+        learnSession = null
+        mainHandler.removeCallbacks(expireLearning)
+    }
     private val legacyAdbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == ACTION_LEGACY_ADB_UI_PULSE) pulseLegacyAdbSwitch(attempt = 0)
@@ -45,7 +85,7 @@ class SteeringWheelKeyService : AccessibilityService() {
         applicationContext.getSharedPreferences(ClusterProjectionManager.PREFS_NAME, Context.MODE_PRIVATE)
     }
 
-    override fun onServiceConnected() {
+    public override fun onServiceConnected() {
         super.onServiceConnected()
         val info = serviceInfo ?: AccessibilityServiceInfo()
         info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS  // 32
@@ -57,6 +97,18 @@ class SteeringWheelKeyService : AccessibilityService() {
         info.flags = info.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
         info.flags = info.flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
         serviceInfo = info
+        if (!keyBridgeRegistered) {
+            val filter = IntentFilter(SteeringKeyBridge.START).apply {
+                addAction(SteeringKeyBridge.STOP); addAction(SteeringKeyBridge.SETTINGS)
+            }
+            ContextCompat.registerReceiver(this, keyBridge, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+            keyBridgeRegistered = true
+        }
+        val voice = getSharedPreferences("voice", Context.MODE_PRIVATE)
+        voiceEnabled = voice.getBoolean("voice_enabled", false)
+        voiceKey = voice.getInt("voice_keycode", DEFAULT_VOICE_KEYCODE)
+        projectionEnabled = prefs.getBoolean(ClusterProjectionManager.KEY_MIRROR_ENABLED, false)
+        projectionKey = prefs.getInt(ClusterProjectionManager.KEY_TRIGGER_KEYCODE, DEFAULT_TRIGGER_KEYCODE)
         if (!legacyAdbReceiverRegistered) {
             registerReceiver(legacyAdbReceiver, IntentFilter(ACTION_LEGACY_ADB_UI_PULSE))
             legacyAdbReceiverRegistered = true
@@ -71,17 +123,27 @@ class SteeringWheelKeyService : AccessibilityService() {
         Log.d(TAG, "connected; filtering steering-wheel keys")
     }
 
-    override fun onKeyEvent(event: KeyEvent): Boolean {
+    public override fun onKeyEvent(event: KeyEvent): Boolean {
         val isDown = event.action == KeyEvent.ACTION_DOWN
-        if (learnMode) {
+        if (capturedUpKey == event.keyCode) {
+            if (!isDown) capturedUpKey = null
+            return true
+        }
+        val session = learnSession
+        if (session != null) {
             return when (learnDecision(event.keyCode, isDown)) {
                 LearnAction.CAPTURE -> {
-                    capturedKey.value = CaptureResult(event.keyCode, assignable = true)
-                    learnMode = false  // got it; dialog moves to the confirm step
+                    sendBroadcast(SteeringKeyBridge.command(this, SteeringKeyBridge.CAPTURE, session).putExtra(SteeringKeyBridge.KEY, event.keyCode))
+                    capturedUpKey = event.keyCode
+                    mainHandler.removeCallbacks(expireCapturedKey)
+                    mainHandler.postDelayed(expireCapturedKey, 2_000L)
+                    clearLearning()
+                    Log.i(TAG, "learn captured code=${event.keyCode}")
                     true
                 }
                 LearnAction.REJECT -> {
-                    capturedKey.value = CaptureResult(event.keyCode, assignable = false)
+                    sendBroadcast(SteeringKeyBridge.command(this, SteeringKeyBridge.CAPTURE, session).putExtra(SteeringKeyBridge.KEY, event.keyCode))
+                    renewLearningTimeout()
                     true  // stay in learn mode; dialog shows "can't assign", waits for another key
                 }
                 LearnAction.CONSUME -> true
@@ -89,9 +151,6 @@ class SteeringWheelKeyService : AccessibilityService() {
         }
         // Voice check: runs after learn-mode, before star decision. Returns true only when voice is
         // enabled and the configured voice key is pressed (isDown). Non-voice keys fall through.
-        val voicePrefs = applicationContext.getSharedPreferences("voice", Context.MODE_PRIVATE)
-        val voiceEnabled = voicePrefs.getBoolean("voice_enabled", false)
-        val voiceKey = voicePrefs.getInt("voice_keycode", DEFAULT_VOICE_KEYCODE)
         when (voiceDecision(event.keyCode, isDown, voiceEnabled, voiceKey, event.repeatCount)) {
             VoiceKeyDecision.TRIGGER -> {
                 Log.i(
@@ -110,9 +169,7 @@ class SteeringWheelKeyService : AccessibilityService() {
             VoiceKeyDecision.CONSUME -> return true
             VoiceKeyDecision.IGNORE -> {}
         }
-        val enabled = prefs.getBoolean(ClusterProjectionManager.KEY_MIRROR_ENABLED, false)
-        val trigger = prefs.getInt(ClusterProjectionManager.KEY_TRIGGER_KEYCODE, DEFAULT_TRIGGER_KEYCODE)
-        return when (starDecision(event.keyCode, isDown, enabled, trigger)) {
+        return when (starDecision(event.keyCode, isDown, projectionEnabled, projectionKey)) {
             StarDecision.CONSUME_AND_TOGGLE -> {
                 val ep = entryPoint()
                 ClusterProjectionManager.toggle(applicationContext, ep.helperClient(), ep.helperBootstrap())
@@ -277,6 +334,13 @@ class SteeringWheelKeyService : AccessibilityService() {
     }
 
     private fun unregisterLegacyAdbReceiver() {
+        clearLearning()
+        capturedUpKey = null
+        mainHandler.removeCallbacks(expireCapturedKey)
+        if (keyBridgeRegistered) {
+            runCatching { unregisterReceiver(keyBridge) }
+            keyBridgeRegistered = false
+        }
         if (!legacyAdbReceiverRegistered) return
         runCatching { unregisterReceiver(legacyAdbReceiver) }
         legacyAdbReceiverRegistered = false
@@ -314,18 +378,5 @@ class SteeringWheelKeyService : AccessibilityService() {
         var instance: SteeringWheelKeyService? = null
             private set
 
-        /**
-         * Learn mode: when true, the next steering-wheel key is captured into [capturedKey] instead
-         * of toggling projection, and every key is consumed so its native action can't fire. Set by
-         * the settings learn dialog; cleared by the service on CAPTURE or by the dialog on dismiss.
-         */
-        @Volatile
-        var learnMode: Boolean = false
-
-        /** Result of a learn-mode key press; the settings dialog (same process) collects this. */
-        data class CaptureResult(val keyCode: Int, val assignable: Boolean)
-
-        /** Last captured key while learning; null = nothing captured yet. */
-        val capturedKey = MutableStateFlow<CaptureResult?>(null)
     }
 }
